@@ -979,7 +979,7 @@ impl App {
         }
 
         let log = &mut self.log;
-        egui::Window::new(t("IDD_LOG")).id(egui::Id::new("log")).open(&mut self.show_log).default_size([520.0, 300.0]).show(ctx, |ui| {
+        os_window(ctx, "log", &mut self.show_log, &t("IDD_LOG"), [520.0, 300.0], |ui| {
             ui.horizontal(|ui| {
                 if ui.button(t("IDC_LOG_CLEAR")).clicked() {
                     log.clear();
@@ -996,7 +996,7 @@ impl App {
                 }
             });
         });
-        egui::Window::new("About Rustfus").open(&mut self.show_about).resizable(false).show(ctx, |ui| {
+        os_window(ctx, "about", &mut self.show_about, "About Rustfus", [440.0, 220.0], |ui| {
             ui.heading(format!("Rustfus {}", env!("CARGO_PKG_VERSION")));
             ui.label("The Reliable USB Formatting Utility, rewritten in Rust.");
             ui.label("Based on Rufus © 2011-2026 Pete Batard. Not affiliated with Rufus.");
@@ -1008,7 +1008,7 @@ impl App {
             ui.label("License: GNU General Public License (GPL) version 3 or later.");
         });
         let mut dark = self.dark;
-        egui::Window::new(t("IDS_UPDATE_SETTINGS_GRP")).id(egui::Id::new("settings")).open(&mut self.show_settings).resizable(false).show(ctx, |ui| {
+        os_window(ctx, "settings", &mut self.show_settings, &t("IDS_UPDATE_SETTINGS_GRP"), [260.0, 60.0], |ui| {
             ui.checkbox(&mut dark, "Dark mode");
         });
         if dark != self.dark {
@@ -1070,6 +1070,20 @@ impl eframe::App for App {
         }
         self.dialogs(&ctx);
     }
+}
+
+/// Shows a dialog in its own OS window while `*open`; closing the window clears `*open`.
+fn os_window(ctx: &egui::Context, id: &str, open: &mut bool, title: &str, size: [f32; 2], mut add: impl FnMut(&mut egui::Ui)) {
+    if !*open {
+        return;
+    }
+    let builder = egui::ViewportBuilder::default().with_title(title).with_inner_size(size);
+    ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ui, _| {
+        egui::CentralPanel::default_margins().show(ui, |ui| add(ui));
+        if ui.ctx().input(|i| i.viewport().close_requested()) {
+            *open = false;
+        }
+    });
 }
 
 fn main() -> eframe::Result {

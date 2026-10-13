@@ -3,7 +3,7 @@ Type=Application
 Name=Rustfus
 GenericName=Bootable USB Creator
 Comment=Create bootable USB drives from ISO and disk images
-Exec=pkexec /usr/bin/rustfus
+Exec=sh -c "exec pkexec env DISPLAY=\\$DISPLAY XAUTHORITY=\\$XAUTHORITY WAYLAND_DISPLAY=\\$WAYLAND_DISPLAY XDG_RUNTIME_DIR=\\$XDG_RUNTIME_DIR /usr/bin/rustfus"
 Icon=rustfus
 Terminal=false
 Categories=System;Utility;

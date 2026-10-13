@@ -57,7 +57,7 @@ Download from the [Releases](../../releases) page:
 | macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Run with `sudo /Applications/Rustfus.app/Contents/MacOS/rustfus` |
 | Debian, Ubuntu, Mint… | `rustfus_<version>-1_<arch>.deb` | `sudo apt install ./rustfus_*.deb` |
 | Fedora, openSUSE, RHEL… | `rustfus-<version>-1.<arch>.rpm` | `sudo dnf install ./rustfus-*.rpm` |
-| Arch, Manjaro, CachyOS… | `rustfus-<version>-1-x86_64.pkg.tar.xz` | `sudo pacman -U rustfus-*.pkg.tar.xz` |
+| Arch, Manjaro, CachyOS… | `rustfus-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U rustfus-*.pkg.tar.zst` |
 | Any Linux | `Rustfus-<version>-<arch>.AppImage` | `chmod +x` and run; asks for your password via pkexec |
 
 The Linux packages add a menu entry that starts Rustfus through `pkexec`
