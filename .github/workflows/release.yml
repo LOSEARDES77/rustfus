@@ -1,0 +1,228 @@
+# Builds, tests and publishes a GitHub release when a version tag is pushed:
+#   git tag v0.1.0 && git push origin v0.1.0
+#
+# Assets: Windows .exe (x86_64, ARM64), macOS universal .dmg, Linux AppImage,
+# .deb and .rpm (x86_64, ARM64), Arch .pkg.tar.xz (x86_64), GPL sources.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag must match Cargo.toml version
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          [ "${GITHUB_REF_NAME}" = "v${version}" ] || { echo "Tag ${GITHUB_REF_NAME} != v${version} in Cargo.toml"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+          targets: x86_64-pc-windows-gnu,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      # Optional tools some tests use to check the written images.
+      - run: sudo apt-get update && sudo apt-get install -y xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
+      - run: cargo test --locked
+      - name: Clippy (Linux, Windows, macOS)
+        run: |
+          for t in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu aarch64-apple-darwin; do
+            cargo clippy --locked --all-targets --target "$t" -- -D warnings
+          done
+
+  windows:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-latest, target: x86_64-pc-windows-msvc, arch: x86_64 }
+          - { os: windows-11-arm, target: aarch64-pc-windows-msvc, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      # build.rs embeds the icon and a manifest that asks for Administrator rights.
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - shell: bash
+        run: |
+          mkdir dist
+          cp "target/${{ matrix.target }}/release/rustfus.exe" "dist/Rustfus-${GITHUB_REF_NAME}-windows-${{ matrix.arch }}.exe"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-windows-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    needs: test
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: |
+          cargo build --locked --release --target aarch64-apple-darwin
+          cargo build --locked --release --target x86_64-apple-darwin
+      - name: Universal Rustfus.app in a .dmg
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          app=build/Rustfus.app
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist
+          lipo -create -output "$app/Contents/MacOS/rustfus" \
+            target/aarch64-apple-darwin/release/rustfus target/x86_64-apple-darwin/release/rustfus
+          iconset=build/rustfus.iconset
+          mkdir -p "$iconset"
+          for s in 16 32 128 256; do
+            sips -z $s $s res/rustfus.png --out "$iconset/icon_${s}x${s}.png" > /dev/null
+            sips -z $((s*2)) $((s*2)) res/rustfus.png --out "$iconset/icon_${s}x${s}@2x.png" > /dev/null
+          done
+          iconutil -c icns "$iconset" -o "$app/Contents/Resources/rustfus.icns"
+          cat > "$app/Contents/Info.plist" <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0"><dict>
+            <key>CFBundleName</key><string>Rustfus</string>
+            <key>CFBundleDisplayName</key><string>Rustfus</string>
+            <key>CFBundleIdentifier</key><string>io.github.rustfus</string>
+            <key>CFBundleVersion</key><string>${version}</string>
+            <key>CFBundleShortVersionString</key><string>${version}</string>
+            <key>CFBundleExecutable</key><string>rustfus</string>
+            <key>CFBundleIconFile</key><string>rustfus</string>
+            <key>CFBundlePackageType</key><string>APPL</string>
+            <key>LSMinimumSystemVersion</key><string>11.0</string>
+            <key>NSHighResolutionCapable</key><true/>
+          </dict></plist>
+          EOF
+          cp LICENSE README.md THIRD_PARTY_NOTICES.md build/
+          ln -s /Applications build/Applications
+          hdiutil create -volname "Rustfus ${version}" -srcfolder build -ov -format UDZO \
+            "dist/Rustfus-${GITHUB_REF_NAME}-macos-universal.dmg"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-macos
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu 22.04 (glibc 2.35) so the binaries run on older distributions too.
+          - { os: ubuntu-22.04,     target: x86_64-unknown-linux-gnu,  arch: x86_64 }
+          - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, arch: aarch64 }
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-deb,cargo-generate-rpm
+      - run: cargo build --locked --release --target ${{ matrix.target }}
+      - name: .deb, .rpm and AppImage
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          mkdir -p dist
+          cargo deb --no-build --target ${{ matrix.target }} --deb-version "${version}-1" -o dist/
+          # RPM versions can't contain '-'; '~' sorts pre-releases correctly.
+          rpm_version=$(echo "$version" | tr - '~')
+          cargo generate-rpm --target ${{ matrix.target }} -s "version = \"$rpm_version\"" -o dist/
+          packaging/appimage.sh "target/${{ matrix.target }}/release/rustfus" "$version" ${{ matrix.arch }} dist
+          ls -la dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-linux-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-linux-${{ matrix.arch }}
+          path: target/${{ matrix.target }}/release/rustfus
+          if-no-files-found: error
+
+  arch:
+    needs: linux
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-linux-x86_64
+          path: bin
+      - name: makepkg
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          useradd -m builder
+          mkdir -p /tmp/arch dist
+          sed "s/@VERSION@/$(echo "$version" | tr - _)/" packaging/PKGBUILD > /tmp/arch/PKGBUILD
+          chown -R builder /tmp/arch
+          chmod 755 bin/rustfus
+          su builder -c "cd /tmp/arch && REPO='$PWD' BIN='$PWD/bin/rustfus' PKGEXT=.pkg.tar.xz makepkg --nodeps"
+          cp /tmp/arch/*.pkg.tar.xz dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-arch
+          path: dist/*
+          if-no-files-found: error
+
+  # GPL corresponding source for the binaries embedded from res/.
+  sources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download upstream sources listed in res/SOURCES.txt
+        run: |
+          dir="rustfus-${GITHUB_REF_NAME}-third-party-sources"
+          mkdir -p "$dir" dist
+          grep -E '^https://' res/SOURCES.txt | while read -r url; do
+            name=$(echo "$url" | sed -E 's|https://||; s|/archive/refs/tags/|-|; s|/archive/|-|; s|[/]|_|g')
+            curl -fsSL --retry 3 -o "$dir/$name" "$url"
+          done
+          cp res/SOURCES.txt THIRD_PARTY_NOTICES.md "$dir/"
+          for f in res/*/readme.txt; do cp "$f" "$dir/$(basename "$(dirname "$f")")-readme.txt"; done
+          tar cf "dist/$dir.tar" "$dir"
+          cp LICENSE THIRD_PARTY_NOTICES.md dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-sources
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    needs: [windows, macos, linux, arch, sources]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          path: dist
+          merge-multiple: true
+      - name: Checksums
+        run: cd dist && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          prerelease=""; [[ "${GITHUB_REF_NAME}" == *-* ]] && prerelease="--prerelease"
+          gh release create "${GITHUB_REF_NAME}" dist/* --title "Rustfus ${GITHUB_REF_NAME}" --generate-notes $prerelease \
+            --notes "Untested on physical drives: see README.md. Writing disks needs root/Administrator. Third-party GPL sources are in the *-third-party-sources.tar asset."

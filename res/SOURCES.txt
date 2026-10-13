@@ -1,0 +1,27 @@
+# Upstream source archives for the GPL binaries embedded from res/.
+# Used by the release workflow to publish the corresponding source
+# (GPL-2.0 section 3, GPL-3.0 section 6). One URL per line.
+
+# ms-sys boot records, Rufus MBR/message MBR, translations (Rufus tree they were taken from)
+https://github.com/pbatard/rufus/archive/875f221d5b4fa2c43cad1b85ae975d106964949f.tar.gz
+# res/grub2 (built with the patch documented in res/grub2/readme.txt)
+https://ftp.gnu.org/gnu/grub/grub-2.14.tar.xz
+https://github.com/gentoo/gentoo/raw/d51cbeb087dbbe979ff29af645f32071cce2834d/sys-boot/grub/files/grub-2.14-revert-image-base.patch
+# res/syslinux and the Syslinux MBRs in res/ms-sys
+https://www.kernel.org/pub/linux/utils/boot/syslinux/4.xx/syslinux-4.07.tar.xz
+https://www.kernel.org/pub/linux/utils/boot/syslinux/Testing/6.04/syslinux-6.04-pre1.tar.xz
+https://www.kernel.org/pub/linux/utils/boot/syslinux/6.xx/syslinux-6.02.tar.xz
+# res/uefi/uefi-ntfs.img
+https://github.com/pbatard/uefi-ntfs/archive/refs/tags/v2.8.tar.gz
+https://github.com/pbatard/ntfs-3g/archive/refs/tags/1.9.tar.gz
+https://github.com/pbatard/efifs/archive/refs/tags/v1.12.tar.gz
+# res/md5
+https://github.com/pbatard/uefi-md5sum/archive/refs/tags/v1.2.tar.gz
+# res/freedos (FreeDOS 1.4 packages, which include their SOURCE)
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/kernel.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/freecom.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/display.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/cpidos.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb_lay.zip
+https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mode.zip
