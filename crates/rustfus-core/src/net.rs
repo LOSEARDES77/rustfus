@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 pub const FILES_URL: &str = "https://rufus.ie/files";
-static RUFUS_PUBKEY: &[u8] = include_bytes!("../res/rufus_pubkey.bin");
+static RUFUS_PUBKEY: &[u8] = include_bytes!("../../../res/rufus_pubkey.bin");
 
 /// Per-user cache, like Rufus' `%LOCALAPPDATA%\Rufus`.
 pub fn cache_dir() -> PathBuf {
@@ -48,7 +48,11 @@ pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
 
 /// `fetch` with extra curl arguments, such as `-H` headers.
 pub fn fetch_with(url: &str, args: &[&str]) -> Result<Vec<u8>, String> {
-    let out = curl().args(args).arg(url).output().map_err(|e| format!("curl: {e}"))?;
+    let out = curl()
+        .args(args)
+        .arg(url)
+        .output()
+        .map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
         return Err(format!(
             "download of {url} failed: {}",

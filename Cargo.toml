@@ -1,32 +1,31 @@
-[package]
-name = "rustfus"
+[workspace]
+members = ["crates/*"]
+
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-description = "Rufus-style bootable USB creator with an egui GUI, for Linux, macOS and Windows."
 license = "GPL-3.0-or-later"
-readme = "README.md"
 repository = "https://github.com/LOSEARDES77/rustfus"
 
-[dependencies]
-bzip2 = "0.6.1"
-crc32fast = "1.5.2"
-eframe = "0.36"
-fatfs = "0.3.6"
-flate2 = "1.1.10"
-lzma-rust2 = "0.22.0"
-md-5 = "0.11.0"
-rfd = "0.17"
-rsa = { version = "0.9.10", default-features = false, features = ["std"] }
-ruzstd = "0.9.1"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-sha1 = "0.11.0"
-sha2 = "0.11.1"
-zip = { version = "9.0.2", default-features = false, features = ["deflate-flate2"] }
+[workspace.dependencies]
+rustfus-core = { path = "crates/rustfus-core" }
+rustfus-gui = { path = "crates/rustfus-gui" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-libc = "0.2"
+[package]
+name = "rustfus"
+description = "Rufus-style bootable USB creator with an egui GUI and a command line, for Linux, macOS and Windows."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+clap = { version = "4.6.7", features = ["derive"] }
+rustfus-core.workspace = true
+rustfus-gui.workspace = true
 
 [profile.release]
 lto = true

@@ -31,11 +31,11 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       # Optional tools some tests use to check the written images.
       - run: sudo apt-get update && sudo apt-get install -y xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
-      - run: cargo test --locked
+      - run: cargo test --workspace --locked
       - name: Clippy (Linux, Windows, macOS)
         run: |
           for t in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu aarch64-apple-darwin; do
-            cargo clippy --locked --all-targets --target "$t" -- -D warnings
+            cargo clippy --locked --workspace --all-targets --target "$t" -- -D warnings
           done
 
   windows:

@@ -47,6 +47,35 @@ cargo build --release
 
 The executable is `target/release/rustfus` (`rustfus.exe` on Windows).
 
+The code is split into a workspace:
+
+| Crate | Contents |
+|---|---|
+| `rustfus` (root) | The `rustfus` executable: the command line, or the GUI when run without arguments |
+| `crates/rustfus-core` | Engine: drive listing, image analysis, partitioning, file systems, boot code, downloads |
+| `crates/rustfus-gui` | The Rufus-style egui interface |
+
+## Command line
+
+Run `rustfus` without arguments for the GUI, or with a command:
+
+```sh
+rustfus list                                   # drives Rustfus can write to (--all adds USB hard drives)
+rustfus info ubuntu.iso                        # what Rustfus detects and the settings it would pick
+sudo rustfus write -d /dev/sdX ubuntu.iso      # ISO mode, with the same defaults as the GUI
+sudo rustfus write -d /dev/sdX disk.img.xz     # DD mode (non-ISO images are always written raw)
+sudo rustfus write -d /dev/sdX --freedos       # FreeDOS boot drive
+sudo rustfus write -d /dev/sdX --fs exfat -l DATA   # format only
+sudo rustfus save -d /dev/sdX backup.vhd       # save a drive to an image
+rustfus download --win "Windows 11" --lang Spanish  # official Windows ISO
+rustfus download --win "Windows 11" --list     # list the choices for the next option
+rustfus hash ubuntu.iso
+```
+
+`rustfus <command> --help` lists every option (partition scheme, target, cluster
+size, persistence, bad blocks, Windows customizations, ...). `write` only accepts
+drives that `rustfus list` shows, and asks before erasing unless given `--yes`.
+
 ## Installing
 
 Download from the [Releases](../../releases) page:
@@ -64,13 +93,14 @@ The Linux packages add a menu entry that starts Rustfus through `pkexec`
 (a polkit policy is installed), because writing to disks needs root.
 
 Optional tools on Linux: `ntfs-3g`, `exfatprogs` and `udftools` for those
-file systems.
+file systems. The Windows ISO download runs Rufus' Fido script when PowerShell 7
+(`pwsh`) is installed, and makes the same queries itself otherwise.
 
 ## Testing
 
 ```sh
-cargo test                    # unit and disk-image tests
-cargo test -- --ignored       # also network tests against rufus.ie
+cargo test --workspace                # unit and disk-image tests
+cargo test --workspace -- --ignored   # also network tests against rufus.ie
 ```
 
 Some tests use `xorriso`, `fsck.vfat`, `e2fsprogs`, `sfdisk` or `qemu-img`

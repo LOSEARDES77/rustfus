@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 
-static LOC_FILE: &str = include_str!("../res/loc/rufus.loc");
+static LOC_FILE: &str = include_str!("../../../res/loc/rufus.loc");
 
 pub struct Lang {
     pub code: String,

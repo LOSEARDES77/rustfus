@@ -9,11 +9,11 @@
 
 use std::io::{Read, Seek, SeekFrom, Write};
 
-const V4_SYS: &[u8] = include_bytes!("../res/syslinux/ldlinux_v4.sys");
-const V4_BSS: &[u8] = include_bytes!("../res/syslinux/ldlinux_v4.bss");
-const V6_SYS: &[u8] = include_bytes!("../res/syslinux/ldlinux_v6.sys");
-const V6_BSS: &[u8] = include_bytes!("../res/syslinux/ldlinux_v6.bss");
-const MBOOT_C32: &[u8] = include_bytes!("../res/syslinux/mboot.c32");
+const V4_SYS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v4.sys");
+const V4_BSS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v4.bss");
+const V6_SYS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v6.sys");
+const V6_BSS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v6.bss");
+const MBOOT_C32: &[u8] = include_bytes!("../../../res/syslinux/mboot.c32");
 
 const SECTOR: usize = 512;
 const ADV_SIZE: usize = 512;

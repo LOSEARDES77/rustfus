@@ -66,6 +66,6 @@ builds compile cleanly but have not been run on those systems.
 | 38 languages (rufus.loc) | 🟢 | 🟢 | 🟢 | |
 | Log, About, dark mode | 🟢 | 🟢 | 🟢 | |
 | Drag and drop images | 🟢 | 🟢 | 🟢 | |
-| Windows ISO download (Fido) | 🟢 | 🟢 | 🟢 | |
+| Windows ISO download (Fido) | 🟢 | 🟢 | 🟢 | Runs Fido.ps1 when PowerShell (`pwsh`) is installed, else built-in |
 | Update check | 🔴 | 🔴 | 🔴 | not implemented |
 | Runs without root / Administrator | 🔴 | 🔴 | 🔴 | raw disk access needs elevation |

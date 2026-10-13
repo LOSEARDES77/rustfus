@@ -10,6 +10,7 @@ url="https://github.com/LOSEARDES77/rustfus"
 license=('GPL-3.0-or-later')
 depends=('glibc' 'gcc-libs' 'libxkbcommon' 'libglvnd' 'polkit')
 optdepends=('curl: GRUB/Syslinux/Fido downloads'
+            'powershell-bin: run Fido itself for Windows ISO downloads'
             'ntfs-3g: NTFS formatting'
             'exfatprogs: exFAT formatting'
             'udftools: UDF formatting'

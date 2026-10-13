@@ -8,20 +8,20 @@
 
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-const MBR_WIN7: &[u8] = include_bytes!("../res/ms-sys/mbr_win7.bin");
-const MBR_RUFUS: &[u8] = include_bytes!("../res/ms-sys/mbr_rufus.bin");
-const MBR_SYSLINUX: &[u8] = include_bytes!("../res/ms-sys/mbr_syslinux.bin");
-const MBR_GPT_SYSLINUX: &[u8] = include_bytes!("../res/ms-sys/mbr_gpt_syslinux.bin");
+const MBR_WIN7: &[u8] = include_bytes!("../../../res/ms-sys/mbr_win7.bin");
+const MBR_RUFUS: &[u8] = include_bytes!("../../../res/ms-sys/mbr_rufus.bin");
+const MBR_SYSLINUX: &[u8] = include_bytes!("../../../res/ms-sys/mbr_syslinux.bin");
+const MBR_GPT_SYSLINUX: &[u8] = include_bytes!("../../../res/ms-sys/mbr_gpt_syslinux.bin");
 // ms-sys mbr_grub2.h is byte-identical to boot.img[..0x1b0] (jump @0x66 already NOPed).
-const GRUB2_BOOT_IMG: &[u8] = include_bytes!("../res/grub2/boot.img");
-const FAT32_0X0: &[u8] = include_bytes!("../res/ms-sys/br_fat32_0x0.bin");
-const FAT32PE_0X52: &[u8] = include_bytes!("../res/ms-sys/br_fat32pe_0x52.bin");
-const FAT32PE_0X3F0: &[u8] = include_bytes!("../res/ms-sys/br_fat32pe_0x3f0.bin");
-const FAT32PE_0X1800: &[u8] = include_bytes!("../res/ms-sys/br_fat32pe_0x1800.bin");
-const FAT32FD_0X52: &[u8] = include_bytes!("../res/ms-sys/br_fat32fd_0x52.bin");
-const FAT32FD_0X3F0: &[u8] = include_bytes!("../res/ms-sys/br_fat32fd_0x3f0.bin");
-const NTFS_0X0: &[u8] = include_bytes!("../res/ms-sys/br_ntfs_0x0.bin");
-const NTFS_0X54: &[u8] = include_bytes!("../res/ms-sys/br_ntfs_0x54.bin");
+const GRUB2_BOOT_IMG: &[u8] = include_bytes!("../../../res/grub2/boot.img");
+const FAT32_0X0: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32_0x0.bin");
+const FAT32PE_0X52: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32pe_0x52.bin");
+const FAT32PE_0X3F0: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32pe_0x3f0.bin");
+const FAT32PE_0X1800: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32pe_0x1800.bin");
+const FAT32FD_0X52: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32fd_0x52.bin");
+const FAT32FD_0X3F0: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32fd_0x3f0.bin");
+const NTFS_0X0: &[u8] = include_bytes!("../../../res/ms-sys/br_ntfs_0x0.bin");
+const NTFS_0X54: &[u8] = include_bytes!("../../../res/ms-sys/br_ntfs_0x54.bin");
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mbr {
@@ -40,8 +40,8 @@ pub enum Mbr {
 }
 
 /// Text shown by `Mbr::RufusMsg`, written by the caller at LBA 34 (after the primary GPT).
-pub static MSG_TEXT: &[u8] = include_bytes!("../res/ms-sys/mbr_msg.txt");
-const MBR_MSG_RUFUS: &[u8] = include_bytes!("../res/ms-sys/mbr_msg_rufus.bin");
+pub static MSG_TEXT: &[u8] = include_bytes!("../../../res/ms-sys/mbr_msg.txt");
+const MBR_MSG_RUFUS: &[u8] = include_bytes!("../../../res/ms-sys/mbr_msg_rufus.bin");
 
 /// Reads `len` bytes at `off` (both sector multiples), lets `edit` patch them, writes them back.
 /// Nothing is written if `edit` fails.
