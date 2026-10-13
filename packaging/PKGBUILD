@@ -13,7 +13,6 @@ optdepends=('curl: GRUB/Syslinux/Fido downloads'
             'ntfs-3g: NTFS formatting'
             'exfatprogs: exFAT formatting'
             'udftools: UDF formatting'
-            'powershell-bin: Windows ISO download (Fido)'
             'vulkan-icd-loader: Vulkan rendering')
 options=('!strip' '!debug')
 

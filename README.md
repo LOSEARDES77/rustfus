@@ -64,8 +64,7 @@ The Linux packages add a menu entry that starts Rustfus through `pkexec`
 (a polkit policy is installed), because writing to disks needs root.
 
 Optional tools on Linux: `ntfs-3g`, `exfatprogs` and `udftools` for those
-file systems, and PowerShell 7 (`pwsh`) on Linux and macOS for the Windows ISO
-download.
+file systems.
 
 ## Testing
 

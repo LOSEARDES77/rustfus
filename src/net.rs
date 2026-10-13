@@ -43,7 +43,12 @@ fn curl() -> Command {
 }
 
 pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
-    let out = curl().arg(url).output().map_err(|e| format!("curl: {e}"))?;
+    fetch_with(url, &[])
+}
+
+/// `fetch` with extra curl arguments, such as `-H` headers.
+pub fn fetch_with(url: &str, args: &[&str]) -> Result<Vec<u8>, String> {
+    let out = curl().args(args).arg(url).output().map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
         return Err(format!(
             "download of {url} failed: {}",
