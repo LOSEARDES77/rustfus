@@ -7,7 +7,6 @@
 //! Syslinux support for ISO mode on FAT, ported from Rufus' syslinux.c/iso.c
 //! and Syslinux' libinstaller (syslxmod.c, fs.c, setadv.c).
 
-
 use std::io::{Read, Seek, SeekFrom, Write};
 
 const V4_SYS: &[u8] = include_bytes!("../res/syslinux/ldlinux_v4.sys");
@@ -89,7 +88,11 @@ fn sl_version(buf: &[u8]) -> Option<(u16, String)> {
             continue;
         }
         let (minor, mut p) = strtoul(&b, p + 1);
-        let version = if minor < 256 { ((major << 8) + minor) as u16 } else { 0 };
+        let version = if minor < 256 {
+            ((major << 8) + minor) as u16
+        } else {
+            0
+        };
         if version == 0 {
             continue;
         }
@@ -115,7 +118,11 @@ fn sl_version(buf: &[u8]) -> Option<(u16, String)> {
                 *c = b'_';
             }
         }
-        let ext = if s.len() == 1 { String::new() } else { String::from_utf8_lossy(&s).into_owned() };
+        let ext = if s.len() == 1 {
+            String::new()
+        } else {
+            String::from_utf8_lossy(&s).into_owned()
+        };
         return Some((version, ext));
     }
     None
@@ -127,7 +134,16 @@ fn embedded(v6: bool) -> (u16, String) {
 
 fn info(version: u16, ext: String) -> Info {
     let (major, minor) = ((version >> 8) as u8, version as u8);
-    Info { major, minor, version: format!("{major}.{minor:02}"), ext, cfg_path: String::new(), overwrite_cfg: false, reactos: None, old_c32: Vec::new() }
+    Info {
+        major,
+        minor,
+        version: format!("{major}.{minor:02}"),
+        ext,
+        cfg_path: String::new(),
+        overwrite_cfg: false,
+        reactos: None,
+        old_c32: Vec::new(),
+    }
 }
 
 fn base(p: &str) -> &str {
@@ -143,24 +159,44 @@ fn read_entry(iso: &crate::iso::Iso, e: &crate::iso::Entry) -> std::io::Result<V
 /// Detects Syslinux (or ReactOS, which Rufus boots through Syslinux v4) like Rufus' ISO scan.
 pub fn detect(iso: &crate::iso::Iso) -> Option<Info> {
     let entries = iso.entries().ok()?;
-    let files: Vec<_> = entries.iter().filter(|e| !e.is_dir && e.symlink().is_none()).collect();
-    let is = |e: &crate::iso::Entry, names: &[&str]| names.iter().any(|n| base(&e.path).eq_ignore_ascii_case(n));
+    let files: Vec<_> = entries
+        .iter()
+        .filter(|e| !e.is_dir && e.symlink().is_none())
+        .collect();
+    let is = |e: &crate::iso::Entry, names: &[&str]| {
+        names.iter().any(|n| base(&e.path).eq_ignore_ascii_case(n))
+    };
     let has_ldlinux_c32 = files.iter().any(|e| is(e, &["ldlinux.c32"]));
-    let configs: Vec<String> = files.iter().filter(|e| is(e, &CFG_NAMES)).map(|e| format!("/{}", e.path)).collect();
+    let configs: Vec<String> = files
+        .iter()
+        .filter(|e| is(e, &CFG_NAMES))
+        .map(|e| format!("/{}", e.path))
+        .collect();
     let old_c32 = files
         .iter()
-        .filter(|e| OLD_C32.iter().any(|(n, max)| base(&e.path).eq_ignore_ascii_case(n) && e.size <= *max))
+        .filter(|e| {
+            OLD_C32
+                .iter()
+                .any(|(n, max)| base(&e.path).eq_ignore_ascii_case(n) && e.size <= *max)
+        })
         .map(|e| e.path.clone())
         .collect();
 
     if configs.is_empty() {
-        let reactos = files.iter().find(|e| is(e, &["setupldr.sys", "freeldr.sys"]))?;
+        let reactos = files
+            .iter()
+            .find(|e| is(e, &["setupldr.sys", "freeldr.sys"]))?;
         let (v, ext) = embedded(false);
-        return Some(Info { reactos: Some(format!("/{}", reactos.path)), ..info(v, ext) });
+        return Some(Info {
+            reactos: Some(format!("/{}", reactos.path)),
+            ..info(v, ext)
+        });
     }
     let (mut cfg, mut overwrite) = (None::<&String>, false);
     for c in &configs {
-        if c.eq_ignore_ascii_case("/boot/i386/loader/isolinux.cfg") || c.eq_ignore_ascii_case("/boot/x86_64/loader/isolinux.cfg") {
+        if c.eq_ignore_ascii_case("/boot/i386/loader/isolinux.cfg")
+            || c.eq_ignore_ascii_case("/boot/x86_64/loader/isolinux.cfg")
+        {
             (cfg, overwrite) = (Some(c), true);
             break;
         }
@@ -172,11 +208,19 @@ pub fn detect(iso: &crate::iso::Iso) -> Option<Info> {
     let cfg_dir = &cfg[..cfg.rfind('/').unwrap_or(0)];
 
     let mut found = (0u16, String::new());
-    for e in files.iter().filter(|e| is(e, &["isolinux.bin", "boot.bin"])) {
-        let Ok(buf) = read_entry(iso, e) else { continue };
+    for e in files
+        .iter()
+        .filter(|e| is(e, &["isolinux.bin", "boot.bin"]))
+    {
+        let Ok(buf) = read_entry(iso, e) else {
+            continue;
+        };
         let v = sl_version(&buf).unwrap_or((0, String::new()));
         // On conflicting versions, prefer the one next to the config file (Antergos).
-        let same_dir = format!("/{}", e.path).as_bytes().get(..cfg_dir.len()).is_some_and(|p| p.eq_ignore_ascii_case(cfg_dir.as_bytes()));
+        let same_dir = format!("/{}", e.path)
+            .as_bytes()
+            .get(..cfg_dir.len())
+            .is_some_and(|p| p.eq_ignore_ascii_case(cfg_dir.as_bytes()));
         if found.0 == 0 || (found != v && same_dir) {
             found = v;
         }
@@ -185,26 +229,46 @@ pub fn detect(iso: &crate::iso::Iso) -> Option<Info> {
         found = (embedded(has_ldlinux_c32).0, String::new());
     }
     let (v, ext) = found;
-    Some(Info { cfg_path: cfg, overwrite_cfg: overwrite, old_c32, ..info(v, ext) })
+    Some(Info {
+        cfg_path: cfg,
+        overwrite_cfg: overwrite,
+        old_c32,
+        ..info(v, ext)
+    })
 }
 
 /// Files to write to the FAT root after copying the ISO (overwriting same-named copies).
-pub fn extra_files(iso: &crate::iso::Iso, info: &Info, log: &dyn Fn(String)) -> Result<Vec<(String, Vec<u8>)>, String> {
+pub fn extra_files(
+    iso: &crate::iso::Iso,
+    info: &Info,
+    log: &dyn Fn(String),
+) -> Result<Vec<(String, Vec<u8>)>, String> {
     if let Some(r) = &info.reactos {
         let cfg = format!("DEFAULT ReactOS\nLABEL ReactOS\n  KERNEL mboot.c32\n  APPEND {r}");
-        return Ok(vec![("mboot.c32".into(), MBOOT_C32.to_vec()), ("syslinux.cfg".into(), cfg.into_bytes())]);
+        return Ok(vec![
+            ("mboot.c32".into(), MBOOT_C32.to_vec()),
+            ("syslinux.cfg".into(), cfg.into_bytes()),
+        ]);
     }
     let mut out = Vec::new();
     let entries = iso.entries().map_err(|e| e.to_string())?;
-    let existing = entries.iter().find(|e| !e.is_dir && e.path.eq_ignore_ascii_case("syslinux.cfg"));
+    let existing = entries
+        .iter()
+        .find(|e| !e.is_dir && e.path.eq_ignore_ascii_case("syslinux.cfg"));
     if let Some(e) = existing
         && info.overwrite_cfg
     {
         log("Renaming: syslinux.cfg ➔ syslinux.org".into());
-        out.push(("syslinux.org".into(), read_entry(iso, e).map_err(|e| e.to_string())?));
+        out.push((
+            "syslinux.org".into(),
+            read_entry(iso, e).map_err(|e| e.to_string())?,
+        ));
     }
     if existing.is_none() || info.overwrite_cfg {
-        let mut cfg = format!("DEFAULT loadconfig\n\nLABEL loadconfig\n  CONFIG {}\n", info.cfg_path);
+        let mut cfg = format!(
+            "DEFAULT loadconfig\n\nLABEL loadconfig\n  CONFIG {}\n",
+            info.cfg_path
+        );
         if let Some(i) = info.cfg_path.rfind('/').filter(|&i| i > 0) {
             cfg += &format!("  APPEND {}/\n", &info.cfg_path[..i]);
         }
@@ -219,10 +283,14 @@ pub fn extra_files(iso: &crate::iso::Iso, info: &Info, log: &dyn Fn(String)) -> 
             let rel = format!("syslinux-{ver}/{name}");
             match crate::net::fetch_signed(&format!("{}/{rel}", crate::net::FILES_URL), &rel) {
                 Ok(data) => {
-                    log(format!("Replacing obsolete '{path}' with the one from Syslinux {ver}"));
+                    log(format!(
+                        "Replacing obsolete '{path}' with the one from Syslinux {ver}"
+                    ));
                     out.push((path.clone(), data));
                 }
-                Err(e) => log(format!("Could not download {name} ({e}); keeping the obsolete one from the ISO")),
+                Err(e) => log(format!(
+                    "Could not download {name} ({e}); keeping the obsolete one from the ISO"
+                )),
             }
         }
     }
@@ -254,7 +322,10 @@ pub fn loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), S
         match r {
             Ok(d) => files.push(d),
             Err(e) if version == emb.0 => {
-                log(format!("Could not download the file ({e}) - will try to use embedded {} version instead", info.version));
+                log(format!(
+                    "Could not download the file ({e}) - will try to use embedded {} version instead",
+                    info.version
+                ));
                 return Ok((V6_SYS.to_vec(), V6_BSS.to_vec()));
             }
             Err(e) => return Err(format!("Syslinux {}{}: {e}", info.version, info.ext)),
@@ -271,7 +342,13 @@ fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
     }
     let sectorsize = get16(b, 11) as i64;
     if sectorsize != SECTOR as i64 {
-        return Err(if (512..=4096).contains(&sectorsize) && sectorsize & (sectorsize - 1) == 0 { "unsupported sectors size" } else { "impossible sector size" });
+        return Err(
+            if (512..=4096).contains(&sectorsize) && sectorsize & (sectorsize - 1) == 0 {
+                "unsupported sectors size"
+            } else {
+                "impossible sector size"
+            },
+        );
     }
     let clustersize = b[13] as i64;
     if clustersize == 0 || clustersize & (clustersize - 1) != 0 {
@@ -286,7 +363,10 @@ fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
         s => s as i64,
     } * b[16] as i64;
     let rootdirents = get16(b, 17) as i64;
-    let dsectors = sectors - get16(b, 14) as i64 - fatsectors - (rootdirents + sectorsize / 32 - 1) / sectorsize;
+    let dsectors = sectors
+        - get16(b, 14) as i64
+        - fatsectors
+        - (rootdirents + sectorsize / 32 - 1) / sectorsize;
     if dsectors < 0 {
         return Err("negative number of data sectors on an FAT volume");
     }
@@ -301,8 +381,12 @@ fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
         }
         if b[38] == 0x29 {
             match fstype(54) {
-                b"FAT12   " if clusters >= 0xFF5 => return Err("more than 4084 clusters but claims FAT12"),
-                b"FAT16   " if clusters < 0xFF5 => return Err("less than 4084 clusters but claims FAT16"),
+                b"FAT12   " if clusters >= 0xFF5 => {
+                    return Err("more than 4084 clusters but claims FAT12");
+                }
+                b"FAT16   " if clusters < 0xFF5 => {
+                    return Err("less than 4084 clusters but claims FAT16");
+                }
                 b"FAT32   " => return Err("less than 65525 clusters but claims FAT32"),
                 b"FAT12   " | b"FAT16   " | b"FAT     " => {}
                 _ => return Err("filesystem type not supported"),
@@ -329,14 +413,24 @@ fn empty_adv() -> Vec<u8> {
 }
 
 /// syslxmod.c generate_extents.
-fn generate_extents(img: &mut [u8], at: usize, nptrs: usize, sectors: &[u64]) -> Result<(), String> {
-    img.get_mut(at..at + nptrs * 10).ok_or("bad extent table")?.fill(0);
+fn generate_extents(
+    img: &mut [u8],
+    at: usize,
+    nptrs: usize,
+    sectors: &[u64],
+) -> Result<(), String> {
+    img.get_mut(at..at + nptrs * 10)
+        .ok_or("bad extent table")?
+        .fill(0);
     let mut out = Vec::new();
     let (mut addr, mut base, mut lba, mut len) = (0x8000u32, 0x8000u32, 0u64, 0u32);
     for &sect in sectors {
         if len != 0 {
             let xbytes = (len + 1) * SECTOR as u32;
-            if sect == lba + len as u64 && xbytes < 65536 && (addr ^ (base + xbytes - 1)) & 0xffff_0000 == 0 {
+            if sect == lba + len as u64
+                && xbytes < 65536
+                && (addr ^ (base + xbytes - 1)) & 0xffff_0000 == 0
+            {
                 len += 1;
                 addr += SECTOR as u32;
                 continue;
@@ -366,11 +460,26 @@ fn patch(img: &mut [u8], bss: &mut [u8], sectors: &[u64], subdir: &str) -> Resul
     if sectors.len() < nsect {
         return Err("ldlinux.sys is too small for its content".into());
     }
-    let pa = (0..=(img.len() - 24) / 4).map(|i| i * 4).find(|&o| get32(img, o) == LDLINUX_MAGIC).ok_or("no LDLINUX_MAGIC in ldlinux.sys")?;
+    let pa = (0..=(img.len() - 24) / 4)
+        .map(|i| i * 4)
+        .find(|&o| get32(img, o) == LDLINUX_MAGIC)
+        .ok_or("no LDLINUX_MAGIC in ldlinux.sys")?;
     let epa = get16(img, pa + 22) as usize;
     let field = |at: usize| get16(img, epa + at) as usize;
-    let (advptr, diroff, dirlen, secptr, secptrcnt, s1p0, s1p1) = (field(0), field(2), field(4), field(10), field(12), field(14), field(16));
-    if epa + 20 > img.len() || s1p0.max(s1p1) + 4 > bss.len() || advptr + 16 > img.len() || diroff + dirlen > img.len() {
+    let (advptr, diroff, dirlen, secptr, secptrcnt, s1p0, s1p1) = (
+        field(0),
+        field(2),
+        field(4),
+        field(10),
+        field(12),
+        field(14),
+        field(16),
+    );
+    if epa + 20 > img.len()
+        || s1p0.max(s1p1) + 4 > bss.len()
+        || advptr + 16 > img.len()
+        || diroff + dirlen > img.len()
+    {
         return Err("corrupt ldlinux.sys patch area".into());
     }
     put32(bss, s1p0, sectors[0] as u32);
@@ -399,9 +508,16 @@ fn patch(img: &mut [u8], bss: &mut [u8], sectors: &[u64], subdir: &str) -> Resul
 }
 
 /// Installs ldlinux.sys and the Syslinux boot sector on a formatted, populated FAT volume.
-pub fn install<F: Read + Write + Seek>(vol: &mut F, info: &Info, log: &dyn Fn(String)) -> Result<(), String> {
+pub fn install<F: Read + Write + Seek>(
+    vol: &mut F,
+    info: &Info,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
     let e = |err: std::io::Error| format!("Syslinux install: {err}");
-    log(format!("Installing Syslinux {}{}...", info.version, info.ext));
+    log(format!(
+        "Installing Syslinux {}{}...",
+        info.version, info.ext
+    ));
     let (sys, mut bss) = loader(info, log)?;
     if bss.len() < SECTOR {
         return Err("ldlinux.bss is too small".into());
@@ -426,7 +542,9 @@ pub fn install<F: Read + Write + Seek>(vol: &mut F, info: &Info, log: &dyn Fn(St
         fs.unmount().map_err(e)?;
     }
     let want = (img.len() + 2 * ADV_SIZE).div_ceil(SECTOR);
-    let (entry, sectors) = crate::fat::root_file(vol, b"LDLINUX SYS", want).map_err(e)?.ok_or("ldlinux.sys not found after writing it")?;
+    let (entry, sectors) = crate::fat::root_file(vol, b"LDLINUX SYS", want)
+        .map_err(e)?
+        .ok_or("ldlinux.sys not found after writing it")?;
 
     // Read-only, hidden, system (fatfs can't set attributes).
     let mut attr = [0u8];
@@ -467,7 +585,13 @@ mod tests {
         assert_eq!(embedded(false), (0x407, "/2013-07-25".into()));
         assert_eq!(embedded(true), (0x604, "/pre1".into()));
         let mut buf = vec![0u8; 300];
-        buf[100..].copy_from_slice(&b"ISOLINUX 6.03 6.03-pre20* \0".iter().chain(&[0u8; 173]).copied().collect::<Vec<_>>());
+        buf[100..].copy_from_slice(
+            &b"ISOLINUX 6.03 6.03-pre20* \0"
+                .iter()
+                .chain(&[0u8; 173])
+                .copied()
+                .collect::<Vec<_>>(),
+        );
         assert_eq!(sl_version(&buf), Some((0x603, "/pre20".into())));
     }
 
@@ -478,14 +602,28 @@ mod tests {
     fn check_install(major: u8) {
         let path = tmp(&format!("vol{major}"));
         let size = 100u64 << 20;
-        let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
         f.set_len(size).unwrap();
         crate::fat::format(&mut f, size, true, 0, *b"SYSLINUX   ", 2048).unwrap();
         {
             let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
             fs.root_dir().create_dir("isolinux").unwrap();
-            fs.root_dir().create_file("isolinux/isolinux.cfg").unwrap().write_all(b"DEFAULT linux\n").unwrap();
-            fs.root_dir().create_file("big.bin").unwrap().write_all(&vec![9u8; 700_000]).unwrap();
+            fs.root_dir()
+                .create_file("isolinux/isolinux.cfg")
+                .unwrap()
+                .write_all(b"DEFAULT linux\n")
+                .unwrap();
+            fs.root_dir()
+                .create_file("big.bin")
+                .unwrap()
+                .write_all(&vec![9u8; 700_000])
+                .unwrap();
             fs.unmount().unwrap();
         }
         crate::fat::fix_dot_entries(&mut f).unwrap();
@@ -494,12 +632,19 @@ mod tests {
         f.read_exact(&mut orig).unwrap();
 
         let (v, ext) = embedded(major >= 5);
-        let info = Info { cfg_path: "/isolinux/isolinux.cfg".into(), ..super::info(v, ext) };
+        let info = Info {
+            cfg_path: "/isolinux/isolinux.cfg".into(),
+            ..super::info(v, ext)
+        };
         f.seek(SeekFrom::Start(12345)).unwrap();
         install(&mut f, &info, &|_| {}).unwrap();
         assert_eq!(f.stream_position().unwrap(), 0);
 
-        let (sys, bss) = if major >= 5 { (V6_SYS, V6_BSS) } else { (V4_SYS, V4_BSS) };
+        let (sys, bss) = if major >= 5 {
+            (V6_SYS, V6_BSS)
+        } else {
+            (V4_SYS, V4_BSS)
+        };
         let mut bs = [0u8; 512];
         f.read_exact(&mut bs).unwrap();
         assert_eq!(bs[..11], bss[..11]);
@@ -510,20 +655,39 @@ mod tests {
         f.seek(SeekFrom::Start(0)).unwrap();
         {
             let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
-            let e = fs.root_dir().iter().map(|e| e.unwrap()).find(|e| e.file_name() == "ldlinux.sys").unwrap();
+            let e = fs
+                .root_dir()
+                .iter()
+                .map(|e| e.unwrap())
+                .find(|e| e.file_name() == "ldlinux.sys")
+                .unwrap();
             let a = e.attributes();
-            assert!(a.contains(fatfs::FileAttributes::READ_ONLY | fatfs::FileAttributes::HIDDEN | fatfs::FileAttributes::SYSTEM));
+            assert!(a.contains(
+                fatfs::FileAttributes::READ_ONLY
+                    | fatfs::FileAttributes::HIDDEN
+                    | fatfs::FileAttributes::SYSTEM
+            ));
             e.to_file().read_to_end(&mut file).unwrap();
             let mut big = Vec::new();
-            fs.root_dir().open_file("big.bin").unwrap().read_to_end(&mut big).unwrap();
+            fs.root_dir()
+                .open_file("big.bin")
+                .unwrap()
+                .read_to_end(&mut big)
+                .unwrap();
             assert_eq!(big, vec![9u8; 700_000]);
         }
         let padded = sys.len().div_ceil(512) * 512;
         assert_eq!(file.len(), padded + 1024);
-        let pa = (0..padded / 4).map(|i| i * 4).find(|&o| get32(&file, o) == LDLINUX_MAGIC).unwrap();
+        let pa = (0..padded / 4)
+            .map(|i| i * 4)
+            .find(|&o| get32(&file, o) == LDLINUX_MAGIC)
+            .unwrap();
         let dw = get32(&file, pa + 12) as usize;
         assert_eq!(dw, padded / 4);
-        assert_eq!((0..dw).fold(0u32, |c, i| c.wrapping_add(get32(&file, i * 4))), LDLINUX_MAGIC);
+        assert_eq!(
+            (0..dw).fold(0u32, |c, i| c.wrapping_add(get32(&file, i * 4))),
+            LDLINUX_MAGIC
+        );
         let data_sectors = get16(&file, pa + 8) as usize;
         assert_eq!(data_sectors, padded / 512);
 
@@ -540,10 +704,17 @@ mod tests {
         assert_eq!(sector(s0), file[..512]);
         let (mut k, mut ex) = (1usize, fld(5));
         while k < data_sectors {
-            let (lba, len) = (u64::from_le_bytes(file[ex..ex + 8].try_into().unwrap()), get16(&file, ex + 8) as u64);
+            let (lba, len) = (
+                u64::from_le_bytes(file[ex..ex + 8].try_into().unwrap()),
+                get16(&file, ex + 8) as u64,
+            );
             assert!(len > 0, "extents end before sector {k}");
             for j in 0..len {
-                assert_eq!(sector(lba + j), file[k * 512..(k + 1) * 512], "file sector {k}");
+                assert_eq!(
+                    sector(lba + j),
+                    file[k * 512..(k + 1) * 512],
+                    "file sector {k}"
+                );
                 k += 1;
             }
             ex += 10;
@@ -559,7 +730,11 @@ mod tests {
 
         if let Ok(out) = Command::new("fsck.vfat").arg("-n").arg(&path).output() {
             let text = String::from_utf8_lossy(&out.stdout);
-            assert!(out.status.success(), "{text}{}", String::from_utf8_lossy(&out.stderr));
+            assert!(
+                out.status.success(),
+                "{text}{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
         }
         std::fs::remove_file(path).ok();
     }
@@ -596,7 +771,10 @@ mod tests {
         }
         let iso = crate::iso::Iso::open(&iso_path).unwrap();
         let info = detect(&iso).unwrap();
-        assert_eq!((info.major, info.version.as_str(), info.ext.as_str()), (6, "6.03", "/2014-10-06"));
+        assert_eq!(
+            (info.major, info.version.as_str(), info.ext.as_str()),
+            (6, "6.03", "/2014-10-06")
+        );
         assert_eq!(info.cfg_path, "/isolinux/isolinux.cfg");
         assert!(info.reactos.is_none() && !info.overwrite_cfg);
         let extra = extra_files(&iso, &info, &|_| {}).unwrap();

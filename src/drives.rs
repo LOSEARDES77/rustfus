@@ -96,7 +96,12 @@ mod imp {
     pub fn list(all: bool) -> Result<Vec<Drive>, String> {
         let json = run(
             "lsblk",
-            &["-J", "-b", "-o", "PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL"],
+            &[
+                "-J",
+                "-b",
+                "-o",
+                "PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL",
+            ],
         )?;
         let l: Lsblk = serde_json::from_str(&json).map_err(|e| e.to_string())?;
         Ok(l.blockdevices
@@ -105,9 +110,16 @@ mod imp {
             .filter(|d| !d.path.starts_with("/dev/zram") && !hosts_system(d))
             .filter(|d| all || d.rm || d.hotplug || d.tran.as_deref() == Some("usb"))
             .map(|d| {
-                let label = d.label.clone().or_else(|| d.children.iter().flatten().find_map(|c| c.label.clone()));
+                let label = d
+                    .label
+                    .clone()
+                    .or_else(|| d.children.iter().flatten().find_map(|c| c.label.clone()));
                 Drive {
-                    name: label.or(d.model).unwrap_or_else(|| "Unknown".into()).trim().to_string(),
+                    name: label
+                        .or(d.model)
+                        .unwrap_or_else(|| "Unknown".into())
+                        .trim()
+                        .to_string(),
                     size: d.size.unwrap_or(0),
                     path: d.path,
                 }
@@ -183,9 +195,21 @@ mod imp {
             .filter(|d| !d.is_system && !d.is_boot && d.size > 0)
             .filter(|d| all || matches!(d.bus_type, 7 | 12 | 13))
             .map(|d| {
-                let name = d.label.filter(|l| !l.is_empty()).or(d.friendly_name).unwrap_or_else(|| "Unknown".into());
-                let letter = d.letter.filter(|l| l.len() == 1).map(|l| format!(" ({l}:)")).unwrap_or_default();
-                Drive { path: format!(r"\\.\PhysicalDrive{}", d.number), name: name + &letter, size: d.size }
+                let name = d
+                    .label
+                    .filter(|l| !l.is_empty())
+                    .or(d.friendly_name)
+                    .unwrap_or_else(|| "Unknown".into());
+                let letter = d
+                    .letter
+                    .filter(|l| l.len() == 1)
+                    .map(|l| format!(" ({l}:)"))
+                    .unwrap_or_default();
+                Drive {
+                    path: format!(r"\\.\PhysicalDrive{}", d.number),
+                    name: name + &letter,
+                    size: d.size,
+                }
             })
             .collect())
     }

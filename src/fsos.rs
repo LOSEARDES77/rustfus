@@ -77,7 +77,8 @@ mod imp {
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let target = dir.to_string_lossy().into_owned();
         let r = if fs == Fs::Ntfs {
-            run("mount", &["-t", "ntfs3", &node, &target]).or_else(|_| run("ntfs-3g", &[&node, &target]))
+            run("mount", &["-t", "ntfs3", &node, &target])
+                .or_else(|_| run("ntfs-3g", &[&node, &target]))
         } else {
             run("mount", &[&node, &target])
         };
@@ -140,7 +141,14 @@ mod imp {
     }
 
     pub fn powershell(script: &str) -> Result<String, String> {
-        run("powershell", &["-NoProfile", "-Command", &format!("$ErrorActionPreference='Stop'; {script}")])
+        run(
+            "powershell",
+            &[
+                "-NoProfile",
+                "-Command",
+                &format!("$ErrorActionPreference='Stop'; {script}"),
+            ],
+        )
     }
 
     pub fn rescan(d: &Drive) -> Result<(), String> {
@@ -155,7 +163,9 @@ mod imp {
             Fs::Refs => "ReFS",
             _ => return Err(format!("{} is not supported on Windows", fs.name())),
         };
-        let unit = cluster_arg(cluster).map(|c| format!(" -AllocationUnitSize {c}")).unwrap_or_default();
+        let unit = cluster_arg(cluster)
+            .map(|c| format!(" -AllocationUnitSize {c}"))
+            .unwrap_or_default();
         powershell(&format!(
             "Get-Partition -DiskNumber {} -PartitionNumber {n} | Format-Volume -FileSystem {name} \
              -NewFileSystemLabel '{label}'{unit} -Confirm:$false",

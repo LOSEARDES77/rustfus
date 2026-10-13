@@ -27,7 +27,11 @@ impl Options {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;").replace('\'', "&apos;")
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 /// Current user locale as a BCP 47 tag, e.g. "en-US".
@@ -37,13 +41,24 @@ pub fn locale() -> String {
         .filter_map(|k| std::env::var(k).ok())
         .find(|v| !v.is_empty() && v != "C" && v != "POSIX");
     #[cfg(target_os = "macos")]
-    let from_env = from_env.or_else(|| crate::drives::run("defaults", &["read", "-g", "AppleLocale"]).ok());
+    let from_env =
+        from_env.or_else(|| crate::drives::run("defaults", &["read", "-g", "AppleLocale"]).ok());
     #[cfg(windows)]
     let from_env = from_env.or_else(|| {
-        crate::drives::run("powershell", &["-NoProfile", "-Command", "(Get-Culture).Name"]).ok()
+        crate::drives::run(
+            "powershell",
+            &["-NoProfile", "-Command", "(Get-Culture).Name"],
+        )
+        .ok()
     });
     from_env
-        .map(|v| v.trim().split(['.', '@']).next().unwrap_or("").replace('_', "-"))
+        .map(|v| {
+            v.trim()
+                .split(['.', '@'])
+                .next()
+                .unwrap_or("")
+                .replace('_', "-")
+        })
         .filter(|v| v.len() >= 2)
         .unwrap_or_else(|| "en-US".into())
 }
@@ -63,9 +78,17 @@ fn commands(tag: &str, inner: &str, cmds: &[String]) -> String {
         s += &format!(
             "        <{inner} wcm:action=\"add\">\n          <Order>{}</Order>\n          <{}>{}</{}>\n        </{inner}>\n",
             i + 1,
-            if inner == "SynchronousCommand" { "CommandLine" } else { "Path" },
+            if inner == "SynchronousCommand" {
+                "CommandLine"
+            } else {
+                "Path"
+            },
             escape(c),
-            if inner == "SynchronousCommand" { "CommandLine" } else { "Path" },
+            if inner == "SynchronousCommand" {
+                "CommandLine"
+            } else {
+                "Path"
+            },
         );
     }
     s + &format!("      </{tag}>\n")
@@ -98,7 +121,11 @@ pub fn unattend_xml(o: &Options, arch: &str) -> String {
     }
     if !special.is_empty() {
         x += "  <settings pass=\"specialize\">\n";
-        x += &component("Microsoft-Windows-Deployment", arch, &commands("RunSynchronous", "RunSynchronousCommand", &special));
+        x += &component(
+            "Microsoft-Windows-Deployment",
+            arch,
+            &commands("RunSynchronous", "RunSynchronousCommand", &special),
+        );
         x += "  </settings>\n";
     }
 
@@ -135,7 +162,10 @@ pub fn unattend_xml(o: &Options, arch: &str) -> String {
             body += &commands(
                 "FirstLogonCommands",
                 "SynchronousCommand",
-                &[format!("net user \"{user}\" /logonpasswordchg:yes"), "net accounts /maxpwage:unlimited".into()],
+                &[
+                    format!("net user \"{user}\" /logonpasswordchg:yes"),
+                    "net accounts /maxpwage:unlimited".into(),
+                ],
             );
         }
         x += &component("Microsoft-Windows-Shell-Setup", arch, &body);
@@ -160,11 +190,18 @@ mod tests {
             wtg_no_internal: false,
         };
         let x = unattend_xml(&o, "amd64");
-        assert!(x.contains("BypassTPMCheck") && x.contains("BypassNRO") && x.contains("PreventDeviceEncryption"));
+        assert!(
+            x.contains("BypassTPMCheck")
+                && x.contains("BypassNRO")
+                && x.contains("PreventDeviceEncryption")
+        );
         assert!(x.contains("<ProtectYourPC>3</ProtectYourPC>"));
         assert!(x.contains("<Name>me&lt;&amp;&gt;</Name>"));
         assert!(!x.contains("me<&>"));
-        assert_eq!(x.matches("<settings").count(), x.matches("</settings>").count());
+        assert_eq!(
+            x.matches("<settings").count(),
+            x.matches("</settings>").count()
+        );
         assert!(!unattend_xml(&Options::default(), "amd64").contains("<settings"));
     }
 }

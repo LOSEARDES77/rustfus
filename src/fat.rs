@@ -65,8 +65,19 @@ fn zero<D: Write + Seek>(dev: &mut D, at: u64, len: u64) -> io::Result<()> {
 
 /// Formats `size` bytes of `dev` as FAT32 (or FAT16). `hidden` is the
 /// partition's starting LBA, which boot code relies on.
-pub fn format<D: Write + Seek>(dev: &mut D, size: u64, fat32: bool, cluster: u32, label: [u8; 11], hidden: u32) -> io::Result<()> {
-    let cluster = if cluster == 0 { default_cluster(size, fat32) } else { cluster };
+pub fn format<D: Write + Seek>(
+    dev: &mut D,
+    size: u64,
+    fat32: bool,
+    cluster: u32,
+    label: [u8; 11],
+    hidden: u32,
+) -> io::Result<()> {
+    let cluster = if cluster == 0 {
+        default_cluster(size, fat32)
+    } else {
+        cluster
+    };
     let spc = cluster as u64 / BPS;
     if !(1..=128).contains(&spc) || !spc.is_power_of_two() {
         return Err(invalid("invalid cluster size"));
@@ -77,10 +88,18 @@ pub fn format<D: Write + Seek>(dev: &mut D, size: u64, fat32: bool, cluster: u32
     }
     let (reserved, root_sectors) = if fat32 { (32u64, 0u64) } else { (1, 32) };
     // Microsoft's FAT size formula (fatgen103).
-    let tmp2 = if fat32 { (256 * spc + 2) / 2 } else { 256 * spc + 2 };
+    let tmp2 = if fat32 {
+        (256 * spc + 2) / 2
+    } else {
+        256 * spc + 2
+    };
     let fatsz = (total - reserved - root_sectors).div_ceil(tmp2);
     let clusters = (total - reserved - 2 * fatsz - root_sectors) / spc;
-    let ok = if fat32 { (65525..0x0FFF_FFF5).contains(&clusters) } else { (4085..65525).contains(&clusters) };
+    let ok = if fat32 {
+        (65525..0x0FFF_FFF5).contains(&clusters)
+    } else {
+        (4085..65525).contains(&clusters)
+    };
     if !ok {
         return Err(invalid(if fat32 {
             "drive too small or cluster size too large for FAT32"
@@ -183,7 +202,11 @@ impl Layout {
         dev.read_exact(&mut b)?;
         let (spc, reserved) = (b[0x0D] as u64, get16(&b, 0x0E));
         let fat32 = get16(&b, 0x16) == 0;
-        let fatsz = if fat32 { get32(&b, 0x24) } else { get16(&b, 0x16) };
+        let fatsz = if fat32 {
+            get32(&b, 0x24)
+        } else {
+            get16(&b, 0x16)
+        };
         let root_sectors = (get16(&b, 0x11) * 32).div_ceil(BPS);
         let fat_start = reserved * BPS;
         let root_start = fat_start + b[0x10] as u64 * fatsz * BPS;
@@ -203,10 +226,18 @@ impl Layout {
 
     fn next<D: Read + Seek>(&self, dev: &mut D, c: u64) -> io::Result<Option<u64>> {
         let mut b = [0u8; 4];
-        let (n, eoc) = if self.fat32 { (4, 0x0FFF_FFF8) } else { (2, 0xFFF8) };
+        let (n, eoc) = if self.fat32 {
+            (4, 0x0FFF_FFF8)
+        } else {
+            (2, 0xFFF8)
+        };
         dev.seek(SeekFrom::Start(self.fat_start + c * n as u64))?;
         dev.read_exact(&mut b[..n])?;
-        let v = if self.fat32 { get32(&b, 0) & 0x0FFF_FFFF } else { get16(&b, 0) };
+        let v = if self.fat32 {
+            get32(&b, 0) & 0x0FFF_FFFF
+        } else {
+            get16(&b, 0)
+        };
         Ok((2..eoc).contains(&v).then_some(v))
     }
 
@@ -229,7 +260,10 @@ impl Layout {
             c = self.next(dev, cl)?;
             hops += 1;
             if hops > 1 << 16 {
-                return Err(io::Error::new(io::ErrorKind::InvalidData, "directory cluster loop"));
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "directory cluster loop",
+                ));
             }
         }
         Ok(out)
@@ -263,7 +297,9 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
         let raw = l.entries(dev, dir)?;
         if dir != root {
             let first = &raw[..128];
-            let slot = |name: &[u8; 11]| (0..4).find(|i| &first[i * 32..i * 32 + 11] == name && first[i * 32 + 11] != 0x0F);
+            let slot = |name: &[u8; 11]| {
+                (0..4).find(|i| &first[i * 32..i * 32 + 11] == name && first[i * 32 + 11] != 0x0F)
+            };
             if let (Some(d), Some(dd)) = (slot(DOT), slot(DOTDOT)) {
                 let mut fixed = first.to_vec();
                 for i in 0..4 {
@@ -272,7 +308,10 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
                         fixed[i * 32] = 0xE5;
                     }
                 }
-                let (mut de, mut dde) = (first[d * 32..d * 32 + 32].to_vec(), first[dd * 32..dd * 32 + 32].to_vec());
+                let (mut de, mut dde) = (
+                    first[d * 32..d * 32 + 32].to_vec(),
+                    first[dd * 32..dd * 32 + 32].to_vec(),
+                );
                 set_cluster(&mut de, dir);
                 set_cluster(&mut dde, parent);
                 fixed[..32].copy_from_slice(&de);
@@ -285,7 +324,12 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
             if e[0] == 0 {
                 break;
             }
-            if e[0] == 0xE5 || e[0] == b'.' || e[11] == 0x0F || e[11] & 0x08 != 0 || e[11] & 0x10 == 0 {
+            if e[0] == 0xE5
+                || e[0] == b'.'
+                || e[11] == 0x0F
+                || e[11] & 0x08 != 0
+                || e[11] & 0x10 == 0
+            {
                 continue;
             }
             let child = entry_cluster(e);
@@ -301,11 +345,19 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
 /// Finds the 8.3 entry `name` in the root directory, like libfat's
 /// searchdir + nextsector: returns the byte offset of its directory entry
 /// and up to `max` volume-relative 512-byte sectors of its cluster chain.
-pub fn root_file<D: Read + Seek>(dev: &mut D, name: &[u8; 11], max: usize) -> io::Result<Option<(u64, Vec<u64>)>> {
+pub fn root_file<D: Read + Seek>(
+    dev: &mut D,
+    name: &[u8; 11],
+    max: usize,
+) -> io::Result<Option<(u64, Vec<u64>)>> {
     let l = Layout::read(dev)?;
     let root = if l.fat32 { l.root_cluster } else { 0 };
     let raw = l.entries(dev, root)?;
-    let csize = if root == 0 { raw.len().max(1) } else { (l.spc * BPS) as usize };
+    let csize = if root == 0 {
+        raw.len().max(1)
+    } else {
+        (l.spc * BPS) as usize
+    };
     let mut starts = vec![l.root_start];
     if root != 0 {
         starts.clear();
@@ -346,22 +398,40 @@ mod tests {
 
     fn check(fat32: bool, size: u64) {
         let path = std::env::temp_dir().join(format!("rustfus-fat-{}-{fat32}", std::process::id()));
-        let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&path)
+            .unwrap();
         f.set_len(size).unwrap();
         format(&mut f, size, fat32, 0, *b"TESTLABEL  ", 2048).unwrap();
         {
             let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
-            fs.root_dir().create_file("bootmgr").unwrap().write_all(&vec![7u8; 300_000]).unwrap();
+            fs.root_dir()
+                .create_file("bootmgr")
+                .unwrap()
+                .write_all(&vec![7u8; 300_000])
+                .unwrap();
             fs.root_dir().create_dir("EFI").unwrap();
             fs.root_dir().create_dir("EFI/BOOT").unwrap();
-            fs.root_dir().create_file("EFI/BOOT/BOOTX64.EFI").unwrap().write_all(b"loader").unwrap();
+            fs.root_dir()
+                .create_file("EFI/BOOT/BOOTX64.EFI")
+                .unwrap()
+                .write_all(b"loader")
+                .unwrap();
             fs.unmount().unwrap();
         }
         fix_dot_entries(&mut f).unwrap();
         {
             let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
             let mut v = Vec::new();
-            fs.root_dir().open_file("bootmgr").unwrap().read_to_end(&mut v).unwrap();
+            fs.root_dir()
+                .open_file("bootmgr")
+                .unwrap()
+                .read_to_end(&mut v)
+                .unwrap();
             assert_eq!(v, vec![7u8; 300_000]);
             assert_eq!(fs.volume_label().trim(), "TESTLABEL");
         }
@@ -374,7 +444,10 @@ mod tests {
         assert_eq!(get32(&bs, 0x1C), 2048);
         if let Ok(out) = Command::new("fsck.vfat").arg("-n").arg(&path).output() {
             let text = String::from_utf8_lossy(&out.stdout);
-            assert!(out.status.success() && !text.contains("Expected") && !text.contains("Bad"), "{text}");
+            assert!(
+                out.status.success() && !text.contains("Expected") && !text.contains("Bad"),
+                "{text}"
+            );
         }
         std::fs::remove_file(path).ok();
     }

@@ -57,10 +57,22 @@ pub enum Fs {
 }
 
 impl Fs {
-    pub const ALL: [Fs; 9] = [Fs::Fat, Fs::Fat32, Fs::Ntfs, Fs::Udf, Fs::Exfat, Fs::Refs, Fs::Ext2, Fs::Ext3, Fs::Ext4];
+    pub const ALL: [Fs; 9] = [
+        Fs::Fat,
+        Fs::Fat32,
+        Fs::Ntfs,
+        Fs::Udf,
+        Fs::Exfat,
+        Fs::Refs,
+        Fs::Ext2,
+        Fs::Ext3,
+        Fs::Ext4,
+    ];
 
     pub fn name(self) -> &'static str {
-        ["FAT", "FAT32", "NTFS", "UDF", "exFAT", "ReFS", "ext2", "ext3", "ext4"][self as usize]
+        [
+            "FAT", "FAT32", "NTFS", "UDF", "exFAT", "ReFS", "ext2", "ext3", "ext4",
+        ][self as usize]
     }
 
     pub fn is_fat(self) -> bool {
@@ -78,7 +90,11 @@ impl Fs {
 
     /// Cluster sizes offered in the UI; 0 is "(Default)".
     pub fn clusters(self) -> Vec<u32> {
-        let range = |lo: u32, hi: u32| std::iter::once(0).chain((lo.ilog2()..=hi.ilog2()).map(|s| 1 << s)).collect();
+        let range = |lo: u32, hi: u32| {
+            std::iter::once(0)
+                .chain((lo.ilog2()..=hi.ilog2()).map(|s| 1 << s))
+                .collect()
+        };
         match self {
             Fs::Fat | Fs::Fat32 => range(512, 65536),
             Fs::Ntfs => range(512, 2 << 20),
@@ -177,7 +193,10 @@ static MD5_LOADERS: [(&str, &[u8]); 6] = [
     ("aa64", include_bytes!("../res/md5/bootaa64.efi")),
     ("arm", include_bytes!("../res/md5/bootarm.efi")),
     ("riscv64", include_bytes!("../res/md5/bootriscv64.efi")),
-    ("loongarch64", include_bytes!("../res/md5/bootloongarch64.efi")),
+    (
+        "loongarch64",
+        include_bytes!("../res/md5/bootloongarch64.efi"),
+    ),
 ];
 macro_rules! embed {
     ($dir:literal: $($n:literal),*) => { [$(($n, include_bytes!(concat!("../res/", $dir, "/", $n)) as &[u8])),*] };
@@ -195,14 +214,22 @@ fn e(err: impl std::fmt::Display) -> String {
 
 pub fn analyze(path: &Path) -> Result<Report, String> {
     let mut head = [0u8; 512];
-    File::open(path).and_then(|mut f| f.read_exact(&mut head)).map_err(e)?;
+    File::open(path)
+        .and_then(|mut f| f.read_exact(&mut head))
+        .map_err(e)?;
     let hybrid = head[510..] == [0x55, 0xAA] && (0..4).any(|i| head[446 + i * 16 + 4] != 0);
     let Ok(iso) = iso::Iso::open(path) else {
-        return Ok(Report { hybrid, ..Default::default() });
+        return Ok(Report {
+            hybrid,
+            ..Default::default()
+        });
     };
     let entries = iso.entries().map_err(e)?;
     let et = iso.el_torito();
-    let lower: Vec<String> = entries.iter().map(|x| x.path.to_ascii_lowercase()).collect();
+    let lower: Vec<String> = entries
+        .iter()
+        .map(|x| x.path.to_ascii_lowercase())
+        .collect();
     let has = |p: &str| lower.iter().any(|x| x == p);
     let efi_loader = |arch: &str| has(&format!("efi/boot/boot{arch}.efi"));
     let grub2_version = entries
@@ -219,7 +246,10 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
         is_iso: true,
         label: iso.volume_id(),
         windows: has("sources/install.wim") || has("sources/install.esd") || has("bootmgr"),
-        efi: et.efi || lower.iter().any(|p| p.starts_with("efi/boot/boot") && p.ends_with(".efi")),
+        efi: et.efi
+            || lower
+                .iter()
+                .any(|p| p.starts_with("efi/boot/boot") && p.ends_with(".efi")),
         bios: et.bios,
         grub2: lower.iter().any(|p| p.starts_with("boot/grub/i386-pc/")),
         large_file: entries.iter().any(|x| x.size > FAT_MAX_FILE),
@@ -239,8 +269,12 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
 
 /// Whether BIOS boot of this image would need a GRUB version Rustfus doesn't embed.
 pub fn needs_grub_download(rep: &Report, scheme: Scheme, target: Target) -> bool {
-    rep.grub2 && !rep.windows && scheme == Scheme::Mbr && target != Target::Uefi
-        && !rep.grub2_version.is_empty() && rep.grub2_version != GRUB2_VERSION
+    rep.grub2
+        && !rep.windows
+        && scheme == Scheme::Mbr
+        && target != Target::Uefi
+        && !rep.grub2_version.is_empty()
+        && rep.grub2_version != GRUB2_VERSION
 }
 
 /// core.img matching the image's GRUB, fetched (signed) from rufus.ie like
@@ -251,7 +285,9 @@ fn grub_core(rep: &Report, allow: bool, ctx: &Ctx) -> std::borrow::Cow<'static, 
         return GRUB2_CORE.into();
     }
     if allow {
-        let cuts = (1..=v.len()).rev().filter(|&i| i == v.len() || matches!(v.as_bytes()[i], b'.' | b'-'));
+        let cuts = (1..=v.len())
+            .rev()
+            .filter(|&i| i == v.len() || matches!(v.as_bytes()[i], b'.' | b'-'));
         for i in cuts {
             let ver = &v[..i];
             let url = format!("{}/grub-{ver}/core.img", crate::net::FILES_URL);
@@ -272,7 +308,9 @@ fn grub_core(rep: &Report, allow: bool, ctx: &Ctx) -> std::borrow::Cow<'static, 
 fn grub_version(module: &[u8]) -> Option<String> {
     let tag = b"GNU GRUB  version ";
     let at = module.windows(tag.len()).position(|w| w == tag)? + tag.len();
-    let end = module[at..].iter().position(|&b| b == 0 || b.is_ascii_whitespace())?;
+    let end = module[at..]
+        .iter()
+        .position(|&b| b == 0 || b.is_ascii_whitespace())?;
     String::from_utf8(module[at..at + end].to_vec()).ok()
 }
 
@@ -284,7 +322,11 @@ pub fn sanitize_label(s: &str, fs: Fs) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '_' | '-'))
         .take(fs.max_label())
         .collect();
-    let l = if fs.is_fat() { l.to_ascii_uppercase() } else { l };
+    let l = if fs.is_fat() {
+        l.to_ascii_uppercase()
+    } else {
+        l
+    };
     match l.trim() {
         "" => "USB".into(),
         t => t.to_string(),
@@ -366,7 +408,11 @@ impl Ctx<'_> {
         self.tx.send(Msg::Log(s.into())).ok();
     }
     fn check(&self) -> Result<(), String> {
-        if self.cancel.load(Ordering::Relaxed) { Err("Cancelled".into()) } else { Ok(()) }
+        if self.cancel.load(Ordering::Relaxed) {
+            Err("Cancelled".into())
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -375,8 +421,14 @@ pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<Strin
     ctx.log(format!("Target: {}", job.drive.label()));
     if let Some(passes) = job.bad_blocks {
         unmount(&job.drive)?;
-        let report = image::bad_blocks(&raw_path(&job.drive), job.drive.size, usize::from(passes), &|p, s| ctx.progress(p, s), cancel)
-            .map_err(e)?;
+        let report = image::bad_blocks(
+            &raw_path(&job.drive),
+            job.drive.size,
+            usize::from(passes),
+            &|p, s| ctx.progress(p, s),
+            cancel,
+        )
+        .map_err(e)?;
         let msg = format!(
             "Bad blocks check: {} bad sectors ({} read, {} write, {} corruption errors)",
             report.bad_sectors, report.read_errors, report.write_errors, report.corruption_errors
@@ -394,11 +446,22 @@ pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<Strin
 }
 
 /// Unmounts the drive, then dumps it to `out` (.img or fixed .vhd).
-pub fn save_drive(d: &Drive, out: &Path, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<String, String> {
+pub fn save_drive(
+    d: &Drive,
+    out: &Path,
+    tx: &Sender<Msg>,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
     unmount(d)?;
     let ctx = Ctx { tx, cancel };
-    image::save_image(&raw_path(d), d.size, out, &|p| ctx.progress(p, format!("Saving image: {:.1}%", p * 100.0)), cancel)
-        .map_err(e)?;
+    image::save_image(
+        &raw_path(d),
+        d.size,
+        out,
+        &|p| ctx.progress(p, format!("Saving image: {:.1}%", p * 100.0)),
+        cancel,
+    )
+    .map_err(e)?;
     Ok(format!("Saved {} to {}", d.path, out.display()))
 }
 
@@ -413,7 +476,11 @@ fn write_dd(img: &Path, d: &Drive, verify: bool, ctx: &Ctx) -> Result<String, St
     }
     let src = image::open(img).map_err(e)?;
     if let Some(size) = src.size.filter(|&s| s > d.size) {
-        return Err(format!("Image ({}) is larger than the drive ({})", human(size), human(d.size)));
+        return Err(format!(
+            "Image ({}) is larger than the drive ({})",
+            human(size),
+            human(d.size)
+        ));
     }
     ctx.progress(0.0, "Unmounting...");
     unmount(d)?;
@@ -474,13 +541,24 @@ fn verify_dev(mut src: image::Source, dev: &File, total: u64, ctx: &Ctx) -> Resu
 
 fn layout(job: &Job, uefi_ntfs: bool) -> Vec<part::Part> {
     let gpt = job.scheme == Scheme::Gpt;
-    let start = if job.old_bios && !gpt { 63 * part::SECTOR } else { MB };
+    let start = if job.old_bios && !gpt {
+        63 * part::SECTOR
+    } else {
+        MB
+    };
     let mut end = (job.drive.size - if gpt { 34 * part::SECTOR } else { 0 }) / MB * MB;
     let mut extra = Vec::new();
     if job.persistence > 0 {
         let size = job.persistence / MB * MB;
         end -= size;
-        extra.push(part::Part { start: end, size, mbr_type: 0x83, gpt_type: part::GPT_LINUX, name: "persistence", active: false });
+        extra.push(part::Part {
+            start: end,
+            size,
+            mbr_type: 0x83,
+            gpt_type: part::GPT_LINUX,
+            name: "persistence",
+            active: false,
+        });
     }
     if uefi_ntfs {
         let size = (UEFI_NTFS.len() as u64).next_multiple_of(MB);
@@ -488,7 +566,14 @@ fn layout(job: &Job, uefi_ntfs: bool) -> Vec<part::Part> {
         for p in &mut extra {
             p.start -= size;
         }
-        extra.push(part::Part { start: end + job.persistence / MB * MB, size, mbr_type: 0xEF, gpt_type: part::GPT_ESP, name: "UEFI:NTFS", active: false });
+        extra.push(part::Part {
+            start: end + job.persistence / MB * MB,
+            size,
+            mbr_type: 0xEF,
+            gpt_type: part::GPT_ESP,
+            name: "UEFI:NTFS",
+            active: false,
+        });
         if job.persistence == 0 {
             extra.last_mut().unwrap().start = end;
         }
@@ -557,7 +642,8 @@ impl<T: fatfs::ReadWriteSeek> Dest<'_, T> {
 
 fn is_boot_cfg(p: &str) -> bool {
     let p = p.to_ascii_lowercase();
-    p.ends_with(".cfg") && (p.starts_with("boot/grub") || p.starts_with("isolinux") || p.starts_with("syslinux"))
+    p.ends_with(".cfg")
+        && (p.starts_with("boot/grub") || p.starts_with("isolinux") || p.starts_with("syslinux"))
 }
 
 /// Adds the persistence kernel option, as Rufus does for casper/live ISOs.
@@ -570,7 +656,13 @@ fn patch_persistence(cfg: &str) -> String {
 
 /// Copies the ISO tree plus Rufus' extras (validation loaders, unattend,
 /// FreeDOS, autorun) to `dest`.
-fn copy_files<T: fatfs::ReadWriteSeek>(job: &Job, rep: &Report, src: Option<&iso::Iso>, dest: &Dest<T>, ctx: &Ctx) -> Result<(), String> {
+fn copy_files<T: fatfs::ReadWriteSeek>(
+    job: &Job,
+    rep: &Report,
+    src: Option<&iso::Iso>,
+    dest: &Dest<T>,
+    ctx: &Ctx,
+) -> Result<(), String> {
     let entries = match src {
         Some(iso) => iso.entries().map_err(e)?,
         None => Vec::new(),
@@ -581,7 +673,8 @@ fn copy_files<T: fatfs::ReadWriteSeek>(job: &Job, rep: &Report, src: Option<&iso
     for entry in &entries {
         ctx.check()?;
         if entry.is_dir {
-            dest.mkdir(&entry.path).map_err(|err| format!("{}: {err}", entry.path))?;
+            dest.mkdir(&entry.path)
+                .map_err(|err| format!("{}: {err}", entry.path))?;
             continue;
         }
         if let Some(target) = entry.symlink() {
@@ -592,7 +685,9 @@ fn copy_files<T: fatfs::ReadWriteSeek>(job: &Job, rep: &Report, src: Option<&iso
         let mut path = entry.path.clone();
         let lower = path.to_ascii_lowercase();
         if job.uefi_validation
-            && let Some((_, loader)) = MD5_LOADERS.iter().find(|(a, _)| lower == format!("efi/boot/boot{a}.efi"))
+            && let Some((_, loader)) = MD5_LOADERS
+                .iter()
+                .find(|(a, _)| lower == format!("efi/boot/boot{a}.efi"))
         {
             loaders.push((path.clone(), *loader));
             path = format!("{}_original.efi", &path[..path.len() - 4]);
@@ -614,7 +709,8 @@ fn copy_files<T: fatfs::ReadWriteSeek>(job: &Job, rep: &Report, src: Option<&iso
             if n == 0 {
                 break;
             }
-            out.write_all(&buf[..n]).map_err(|err| format!("{path}: {err}"))?;
+            out.write_all(&buf[..n])
+                .map_err(|err| format!("{path}: {err}"))?;
             md5.update(&buf[..n]);
             done += n as u64;
             let pct = done as f32 / total as f32;
@@ -630,22 +726,35 @@ fn copy_files<T: fatfs::ReadWriteSeek>(job: &Job, rep: &Report, src: Option<&iso
     }
     if job.uefi_validation && src.is_some() {
         let header = format!("# md5_totalbytes = 0x{done:x}\n");
-        dest.put("md5sum.txt", (header + &md5sums).as_bytes()).map_err(e)?;
+        dest.put("md5sum.txt", (header + &md5sums).as_bytes())
+            .map_err(e)?;
     }
     if rep.windows && job.wue.any() {
         ctx.log("Writing autounattend.xml");
-        dest.put("autounattend.xml", wue::unattend_xml(&job.wue, rep.arch).as_bytes()).map_err(e)?;
+        dest.put(
+            "autounattend.xml",
+            wue::unattend_xml(&job.wue, rep.arch).as_bytes(),
+        )
+        .map_err(e)?;
     }
     if job.boot == Boot::FreeDos {
         dest.mkdir("LOCALE").map_err(e)?;
         for (name, data) in FREEDOS.iter() {
-            let p = if matches!(*name, "COMMAND.COM" | "KERNEL.SYS") { name.to_string() } else { format!("LOCALE/{name}") };
+            let p = if matches!(*name, "COMMAND.COM" | "KERNEL.SYS") {
+                name.to_string()
+            } else {
+                format!("LOCALE/{name}")
+            };
             dest.put(&p, data).map_err(e)?;
         }
-        dest.put("AUTOEXEC.BAT", b"@echo off\r\nSET PATH=\\LOCALE\r\n").map_err(e)?;
+        dest.put("AUTOEXEC.BAT", b"@echo off\r\nSET PATH=\\LOCALE\r\n")
+            .map_err(e)?;
     }
     if job.ext_label && !has("autorun.inf") {
-        let inf = format!("; Created by Rustfus\r\n[autorun]\r\nicon  = autorun.ico\r\nlabel = {}\r\n", job.label);
+        let inf = format!(
+            "; Created by Rustfus\r\n[autorun]\r\nicon  = autorun.ico\r\nlabel = {}\r\n",
+            job.label
+        );
         dest.put("autorun.inf", inf.as_bytes()).map_err(e)?;
         dest.put("autorun.ico", AUTORUN_ICO).map_err(e)?;
     }
@@ -686,7 +795,14 @@ fn zero_range(dev: &File, start: u64, len: u64, ctx: Option<&Ctx>) -> Result<(),
 }
 
 /// Partition table, MBR boot code and the raw UEFI:NTFS image.
-fn write_tables(job: &Job, rep: &Report, sl: Option<&syslinux::Info>, parts: &[part::Part], dev: &File, ctx: &Ctx) -> Result<(), String> {
+fn write_tables(
+    job: &Job,
+    rep: &Report,
+    sl: Option<&syslinux::Info>,
+    parts: &[part::Part],
+    dev: &File,
+    ctx: &Ctx,
+) -> Result<(), String> {
     let mut disk = BlockDev::new(dev, 0, job.drive.size / part::SECTOR * part::SECTOR);
     match job.scheme {
         Scheme::Mbr => part::write_mbr(&mut disk, job.drive.size, parts),
@@ -723,13 +839,28 @@ fn write_tables(job: &Job, rep: &Report, sl: Option<&syslinux::Info>, parts: &[p
 }
 
 /// FAT/FAT32 path: Rustfus formats and fills the partition itself.
-fn write_fat(job: &Job, rep: &Report, iso: Option<&iso::Iso>, sl: Option<&syslinux::Info>, main: &part::Part, dev: &File, ctx: &Ctx) -> Result<(), String> {
+fn write_fat(
+    job: &Job,
+    rep: &Report,
+    iso: Option<&iso::Iso>,
+    sl: Option<&syslinux::Info>,
+    main: &part::Part,
+    dev: &File,
+    ctx: &Ctx,
+) -> Result<(), String> {
     ctx.progress(0.0, format!("Formatting ({})...", job.fs.name()));
     let mut vol = BlockDev::new(dev, main.start, main.size);
     let label = fat_label(&sanitize_label(&job.label, job.fs));
     let hidden = (main.start / part::SECTOR) as u32;
-    crate::fat::format(&mut vol, main.size, job.fs == Fs::Fat32, job.cluster, label, hidden)
-        .map_err(|err| format!("Format failed: {err}"))?;
+    crate::fat::format(
+        &mut vol,
+        main.size,
+        job.fs == Fs::Fat32,
+        job.cluster,
+        label,
+        hidden,
+    )
+    .map_err(|err| format!("Format failed: {err}"))?;
     {
         let fat = fatfs::FileSystem::new(&mut vol, fatfs::FsOptions::new()).map_err(e)?;
         let dest = Dest::Fat(&fat);
@@ -772,10 +903,24 @@ fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, String> {
     let esp = 260 * MB;
     let mut parts = Vec::new();
     if gpt {
-        parts.push(part::Part { start: MB, size: esp, mbr_type: 0xEF, gpt_type: part::GPT_ESP, name: "EFI System Partition", active: false });
+        parts.push(part::Part {
+            start: MB,
+            size: esp,
+            mbr_type: 0xEF,
+            gpt_type: part::GPT_ESP,
+            name: "EFI System Partition",
+            active: false,
+        });
     }
     let start = if gpt { MB + esp } else { MB };
-    parts.push(part::Part { start, size: end - start, mbr_type: 0x07, gpt_type: part::GPT_BASIC_DATA, name: "Windows", active: !gpt });
+    parts.push(part::Part {
+        start,
+        size: end - start,
+        mbr_type: 0x07,
+        gpt_type: part::GPT_BASIC_DATA,
+        name: "Windows",
+        active: !gpt,
+    });
 
     ctx.progress(0.0, "Unmounting...");
     unmount(&job.drive)?;
@@ -785,7 +930,12 @@ fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, String> {
     }
     {
         let mut disk = BlockDev::new(&dev, 0, job.drive.size / part::SECTOR * part::SECTOR);
-        if gpt { part::write_gpt(&mut disk, job.drive.size, &parts) } else { part::write_mbr(&mut disk, job.drive.size, &parts) }.map_err(e)?;
+        if gpt {
+            part::write_gpt(&mut disk, job.drive.size, &parts)
+        } else {
+            part::write_mbr(&mut disk, job.drive.size, &parts)
+        }
+        .map_err(e)?;
         if !gpt {
             bootrec::write_mbr(&mut disk, bootrec::Mbr::Win7).map_err(e)?;
         }
@@ -793,20 +943,44 @@ fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, String> {
     }
     if gpt {
         let mut vol = BlockDev::new(&dev, MB, esp);
-        crate::fat::format(&mut vol, esp, true, 0, fat_label("ESP"), (MB / part::SECTOR) as u32).map_err(e)?;
+        crate::fat::format(
+            &mut vol,
+            esp,
+            true,
+            0,
+            fat_label("ESP"),
+            (MB / part::SECTOR) as u32,
+        )
+        .map_err(e)?;
         vol.flush().map_err(e)?;
     }
     drop(dev);
     fsos::rescan(&job.drive)?;
     let n = parts.len() as u32;
     ctx.progress(0.0, "Formatting (NTFS)...");
-    fsos::mkfs(&job.drive, n, Fs::Ntfs, &sanitize_label(&job.label, Fs::Ntfs), job.cluster)?;
+    fsos::mkfs(
+        &job.drive,
+        n,
+        Fs::Ntfs,
+        &sanitize_label(&job.label, Fs::Ntfs),
+        job.cluster,
+    )?;
     let win = fsos::mount(&job.drive, n, Fs::Ntfs)?;
-    let sys = if gpt { fsos::mount(&job.drive, 1, Fs::Fat32)? } else { win.clone() };
+    let sys = if gpt {
+        fsos::mount(&job.drive, 1, Fs::Fat32)?
+    } else {
+        win.clone()
+    };
 
     let iso_path = img.to_string_lossy().replace('\'', "''");
-    let letter = fsos::powershell(&format!("(Mount-DiskImage -ImagePath '{iso_path}' -PassThru | Get-Volume).DriveLetter"))?;
-    let letter = letter.trim().chars().next().ok_or("could not mount the ISO")?;
+    let letter = fsos::powershell(&format!(
+        "(Mount-DiskImage -ImagePath '{iso_path}' -PassThru | Get-Volume).DriveLetter"
+    ))?;
+    let letter = letter
+        .trim()
+        .chars()
+        .next()
+        .ok_or("could not mount the ISO")?;
     let result = (|| {
         let src = ["install.wim", "install.esd"]
             .iter()
@@ -815,21 +989,44 @@ fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, String> {
             .ok_or("no install.wim/esd in the image")?;
         let win_s = win.to_string_lossy().trim_end_matches('\\').to_string();
         ctx.progress(0.5, "Applying Windows image (this can take a long time)...");
-        ctx.log(format!("dism /Apply-Image /ImageFile:{src} /Index:{index} /ApplyDir:{win_s}\\"));
-        run("dism", &["/Apply-Image", &format!("/ImageFile:{src}"), &format!("/Index:{index}"), &format!(r"/ApplyDir:{win_s}\")])?;
+        ctx.log(format!(
+            "dism /Apply-Image /ImageFile:{src} /Index:{index} /ApplyDir:{win_s}\\"
+        ));
+        run(
+            "dism",
+            &[
+                "/Apply-Image",
+                &format!("/ImageFile:{src}"),
+                &format!("/Index:{index}"),
+                &format!(r"/ApplyDir:{win_s}\"),
+            ],
+        )?;
         if job.wue.wtg_no_internal {
             let xml = wtg::SAN_POLICY_XML.replace("ARCH", "amd64");
             std::fs::write(win.join("san_policy.xml"), xml).map_err(e)?;
-            run("dism", &[&format!(r"/Image:{win_s}\"), &format!(r"/Apply-Unattend:{win_s}\san_policy.xml")])?;
+            run(
+                "dism",
+                &[
+                    &format!(r"/Image:{win_s}\"),
+                    &format!(r"/Apply-Unattend:{win_s}\san_policy.xml"),
+                ],
+            )?;
         }
         if job.wue.any() {
             let panther = win.join("Windows").join("Panther");
             std::fs::create_dir_all(&panther).map_err(e)?;
-            std::fs::write(panther.join("unattend.xml"), wue::unattend_xml(&job.wue, "amd64")).map_err(e)?;
+            std::fs::write(
+                panther.join("unattend.xml"),
+                wue::unattend_xml(&job.wue, "amd64"),
+            )
+            .map_err(e)?;
         }
         ctx.progress(0.9, "Installing boot files...");
         let sys_s = sys.to_string_lossy().trim_end_matches('\\').to_string();
-        run("bcdboot", &[&format!(r"{win_s}\Windows"), "/s", &sys_s, "/f", "ALL"])?;
+        run(
+            "bcdboot",
+            &[&format!(r"{win_s}\Windows"), "/s", &sys_s, "/f", "ALL"],
+        )?;
         Ok::<(), String>(())
     })();
     fsos::powershell(&format!("Dismount-DiskImage -ImagePath '{iso_path}'")).ok();
@@ -854,20 +1051,30 @@ fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     // Like Rufus: Syslinux only for FAT, non-Windows, BIOS-capable targets.
     let sl = iso
         .as_ref()
-        .filter(|_| fs.is_fat() && !rep.windows && job.target != Target::Uefi && job.scheme == Scheme::Mbr)
+        .filter(|_| {
+            fs.is_fat() && !rep.windows && job.target != Target::Uefi && job.scheme == Scheme::Mbr
+        })
         .and_then(syslinux::detect);
     if let Some(sl) = &sl {
         ctx.log(format!("Syslinux {}{} detected", sl.version, sl.ext));
         // Fetch a non-embedded loader now so a download failure leaves the drive untouched.
         syslinux::loader(sl, &|m| ctx.log(m))?;
     }
-    let parts = layout(job, !fs.is_fat() && iso.is_some() && job.target != Target::Bios);
+    let parts = layout(
+        job,
+        !fs.is_fat() && iso.is_some() && job.target != Target::Bios,
+    );
 
     ctx.progress(0.0, "Unmounting...");
     unmount(&job.drive)?;
     let dev = open_dev(&job.drive)?;
     if !job.quick {
-        zero_range(&dev, 0, job.drive.size / part::SECTOR * part::SECTOR, Some(ctx))?;
+        zero_range(
+            &dev,
+            0,
+            job.drive.size / part::SECTOR * part::SECTOR,
+            Some(ctx),
+        )?;
     }
     // Clear stale filesystem signatures at the start of every partition.
     for p in &parts {
@@ -881,17 +1088,24 @@ fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
         write_fat(job, &rep, iso.as_ref(), sl.as_ref(), &parts[0], &dev, ctx)?;
     } else if let Some(kind) = ext_kind(fs) {
         if needs_files && !cfg!(target_os = "linux") {
-            return Err(format!("Copying files to {} needs Linux; use FAT32/NTFS/exFAT", fs.name()));
+            return Err(format!(
+                "Copying files to {} needs Linux; use FAT32/NTFS/exFAT",
+                fs.name()
+            ));
         }
         ctx.progress(0.0, format!("Formatting ({})...", fs.name()));
         let mut vol = BlockDev::new(&dev, parts[0].start, parts[0].size);
-        crate::ext::format(&mut vol, parts[0].size, kind, &label, job.cluster, &[]).map_err(|err| format!("Format failed: {err}"))?;
+        crate::ext::format(&mut vol, parts[0].size, kind, &label, job.cluster, &[])
+            .map_err(|err| format!("Format failed: {err}"))?;
         vol.flush().map_err(e)?;
     }
     // Persistence is created by Rustfus' own ext formatter, so it works on every OS.
     if let Some(p) = parts.iter().find(|p| p.name == "persistence") {
-        let (plabel, conf): (&str, &[(&str, &[u8])]) =
-            if rep.casper { ("casper-rw", &[]) } else { ("persistence", &[("persistence.conf", b"/ union\n")]) };
+        let (plabel, conf): (&str, &[(&str, &[u8])]) = if rep.casper {
+            ("casper-rw", &[])
+        } else {
+            ("persistence", &[("persistence.conf", b"/ union\n")])
+        };
         ctx.progress(0.0, "Creating persistent partition...");
         let mut vol = BlockDev::new(&dev, p.start, p.size);
         crate::ext::format(&mut vol, p.size, crate::ext::Kind::Ext3, plabel, 0, conf).map_err(e)?;
@@ -923,11 +1137,16 @@ fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
         if fs == Fs::Ntfs && rep.windows && job.target != Target::Uefi && !cfg!(windows) {
             // mkntfs boot code can't load BOOTMGR; Windows' own format already can.
             let dev = open_dev(&job.drive)?;
-            bootrec::write_ntfs_pbr(&mut BlockDev::new(&dev, parts[0].start, parts[0].size)).map_err(e)?;
+            bootrec::write_ntfs_pbr(&mut BlockDev::new(&dev, parts[0].start, parts[0].size))
+                .map_err(e)?;
         }
     }
 
-    Ok(format!("{} ready ({} \"{label}\")", job.drive.path, fs.name()))
+    Ok(format!(
+        "{} ready ({} \"{label}\")",
+        job.drive.path,
+        fs.name()
+    ))
 }
 
 #[cfg(test)]
@@ -943,7 +1162,10 @@ mod tests {
 
     #[test]
     fn grub_version_is_found() {
-        assert_eq!(grub_version(b"\0\0GNU GRUB  version 2.12\0rest").as_deref(), Some("2.12"));
+        assert_eq!(
+            grub_version(b"\0\0GNU GRUB  version 2.12\0rest").as_deref(),
+            Some("2.12")
+        );
         assert_eq!(grub_version(b"nothing here"), None);
     }
 
@@ -969,8 +1191,15 @@ mod tests {
         std::fs::write(&img, &data).unwrap();
         std::fs::write(&devp, vec![0xffu8; CHUNK * 2]).unwrap();
         let (tx, cancel) = ctx_parts();
-        let ctx = Ctx { tx: &tx, cancel: &cancel };
-        let dev = OpenOptions::new().read(true).write(true).open(&devp).unwrap();
+        let ctx = Ctx {
+            tx: &tx,
+            cancel: &cancel,
+        };
+        let dev = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&devp)
+            .unwrap();
         let n = copy(image::open(&img).unwrap(), &dev, (CHUNK * 2) as u64, &ctx).unwrap();
         verify_dev(image::open(&img).unwrap(), &dev, n, &ctx).unwrap();
         let out = std::fs::read(&devp).unwrap();
@@ -983,7 +1212,11 @@ mod tests {
 
     #[test]
     fn layout_places_extra_partitions_at_end() {
-        let drive = Drive { path: "x".into(), name: "x".into(), size: 1000 * MB + 12345 };
+        let drive = Drive {
+            path: "x".into(),
+            name: "x".into(),
+            size: 1000 * MB + 12345,
+        };
         let mut job = test_job(drive, PathBuf::from("x.iso"));
         job.fs = Fs::Ntfs;
         job.persistence = 100 * MB;
@@ -1014,7 +1247,10 @@ mod tests {
             old_bios: false,
             uefi_validation: true,
             persistence: 0,
-            wue: wue::Options { bypass_hw_checks: true, ..Default::default() },
+            wue: wue::Options {
+                bypass_hw_checks: true,
+                ..Default::default()
+            },
             allow_downloads: false,
             wtg: None,
         }
@@ -1049,25 +1285,44 @@ mod tests {
         let iso = iso::Iso::open(&iso_path).unwrap();
         let sl = syslinux::detect(&iso).expect("syslinux detected");
         assert_eq!(sl.major, 4);
-        let drive = Drive { path: devp.to_string_lossy().into(), name: "img".into(), size };
+        let drive = Drive {
+            path: devp.to_string_lossy().into(),
+            name: "img".into(),
+            size,
+        };
         let mut job = test_job(drive, iso_path);
         job.uefi_validation = false;
         let (tx, cancel) = ctx_parts();
-        let ctx = Ctx { tx: &tx, cancel: &cancel };
+        let ctx = Ctx {
+            tx: &tx,
+            cancel: &cancel,
+        };
         let parts = layout(&job, false);
-        let dev = OpenOptions::new().read(true).write(true).open(&devp).unwrap();
+        let dev = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&devp)
+            .unwrap();
         write_tables(&job, &rep, Some(&sl), &parts, &dev, &ctx).unwrap();
         write_fat(&job, &rep, Some(&iso), Some(&sl), &parts[0], &dev, &ctx).unwrap();
 
         let raw = std::fs::read(&devp).unwrap();
-        assert_eq!(&raw[..16], &bootrec_mbr_syslinux()[..16], "Syslinux MBR code");
+        assert_eq!(
+            &raw[..16],
+            &bootrec_mbr_syslinux()[..16],
+            "Syslinux MBR code"
+        );
         let p = &raw[parts[0].start as usize..(parts[0].start + parts[0].size) as usize];
         let part_img = dir.join("part.img");
         std::fs::write(&part_img, p).unwrap();
         let mut f = File::open(&part_img).unwrap();
         let fat = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
         let mut cfg = String::new();
-        fat.root_dir().open_file("syslinux.cfg").unwrap().read_to_string(&mut cfg).unwrap();
+        fat.root_dir()
+            .open_file("syslinux.cfg")
+            .unwrap()
+            .read_to_string(&mut cfg)
+            .unwrap();
         assert!(cfg.contains("CONFIG /isolinux/isolinux.cfg"));
         assert!(fat.root_dir().open_file("ldlinux.sys").is_ok());
         std::fs::remove_dir_all(dir).ok();
@@ -1107,12 +1362,23 @@ mod tests {
         assert!(rep.windows && rep.efi && !rep.large_file);
         assert_eq!(rep.label, "CCCOMA_X64");
         let iso = iso::Iso::open(&iso_path).unwrap();
-        let drive = Drive { path: devp.to_string_lossy().into(), name: "img".into(), size };
+        let drive = Drive {
+            path: devp.to_string_lossy().into(),
+            name: "img".into(),
+            size,
+        };
         let job = test_job(drive, iso_path);
         let (tx, cancel) = ctx_parts();
-        let ctx = Ctx { tx: &tx, cancel: &cancel };
+        let ctx = Ctx {
+            tx: &tx,
+            cancel: &cancel,
+        };
         let parts = layout(&job, false);
-        let dev = OpenOptions::new().read(true).write(true).open(&devp).unwrap();
+        let dev = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&devp)
+            .unwrap();
         write_tables(&job, &rep, None, &parts, &dev, &ctx).unwrap();
         write_fat(&job, &rep, Some(&iso), None, &parts[0], &dev, &ctx).unwrap();
 
@@ -1120,26 +1386,58 @@ mod tests {
         assert_eq!(&raw[510..512], &[0x55, 0xAA]);
         assert_eq!(raw[446], 0x80);
         let part_img = dir.join("part.img");
-        std::fs::write(&part_img, &raw[parts[0].start as usize..(parts[0].start + parts[0].size) as usize]).unwrap();
+        std::fs::write(
+            &part_img,
+            &raw[parts[0].start as usize..(parts[0].start + parts[0].size) as usize],
+        )
+        .unwrap();
         {
             let mut f = File::open(&part_img).unwrap();
             let fat = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
             let read = |p: &str| {
                 let mut s = Vec::new();
-                fat.root_dir().open_file(p).unwrap().read_to_end(&mut s).unwrap();
+                fat.root_dir()
+                    .open_file(p)
+                    .unwrap()
+                    .read_to_end(&mut s)
+                    .unwrap();
                 s
             };
             let b = read("bootmgr");
             assert_eq!(b.len(), 300_000);
-            assert!(b.iter().all(|&x| x == 7), "first bad byte at {:?}", b.iter().position(|&x| x != 7));
+            assert!(
+                b.iter().all(|&x| x == 7),
+                "first bad byte at {:?}",
+                b.iter().position(|&x| x != 7)
+            );
             assert_eq!(read("EFI/BOOT/BOOTX64_original.efi"), b"loader");
             assert_eq!(read("EFI/BOOT/BOOTX64.EFI"), MD5_LOADERS[0].1);
-            assert!(String::from_utf8(read("md5sum.txt")).unwrap().contains("./bootmgr"));
-            assert!(String::from_utf8(read("autounattend.xml")).unwrap().contains("BypassTPMCheck"));
-            assert!(String::from_utf8(read("autorun.inf")).unwrap().contains("label = CCCOMA_X64"));
+            assert!(
+                String::from_utf8(read("md5sum.txt"))
+                    .unwrap()
+                    .contains("./bootmgr")
+            );
+            assert!(
+                String::from_utf8(read("autounattend.xml"))
+                    .unwrap()
+                    .contains("BypassTPMCheck")
+            );
+            assert!(
+                String::from_utf8(read("autorun.inf"))
+                    .unwrap()
+                    .contains("label = CCCOMA_X64")
+            );
         }
-        if let Ok(out) = std::process::Command::new("fsck.vfat").arg("-n").arg(&part_img).output() {
-            assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stdout));
+        if let Ok(out) = std::process::Command::new("fsck.vfat")
+            .arg("-n")
+            .arg(&part_img)
+            .output()
+        {
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stdout)
+            );
         }
         std::fs::remove_dir_all(dir).ok();
     }

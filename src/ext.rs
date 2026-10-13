@@ -36,7 +36,11 @@ const CRC32C: [u32; 256] = {
         let mut c = i as u32;
         let mut k = 0;
         while k < 8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0x82F6_3B78 } else { c >> 1 };
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0x82F6_3B78
+            } else {
+                c >> 1
+            };
             k += 1;
         }
         t[i] = c;
@@ -47,7 +51,9 @@ const CRC32C: [u32; 256] = {
 
 /// Raw crc32c (no pre/post inversion), as ext4's checksums use it.
 fn crc32c(crc: u32, data: &[u8]) -> u32 {
-    data.iter().fold(crc, |c, &b| CRC32C[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8))
+    data.iter().fold(crc, |c, &b| {
+        CRC32C[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8)
+    })
 }
 
 fn has_sb(g: u64) -> bool {
@@ -148,7 +154,11 @@ impl Fs {
             if off + min > end {
                 return Err(invalid("too many files for the root directory"));
             }
-            let rec = if k + 1 == entries.len() { end - off } else { min };
+            let rec = if k + 1 == entries.len() {
+                end - off
+            } else {
+                min
+            };
             put32(&mut b, off, ino);
             put16(&mut b, off + 4, rec as u16);
             b[off + 6] = name.len() as u8;
@@ -170,7 +180,14 @@ impl Fs {
 
     /// Allocates blocks for `size` bytes (the first `content.len()` of
     /// them stored, the rest zero) and returns the finished inode.
-    fn inode(&mut self, ino: u32, mode: u16, links: u16, content: &[u8], size: u64) -> io::Result<[u8; ISIZE]> {
+    fn inode(
+        &mut self,
+        ino: u32,
+        mode: u16,
+        links: u16,
+        content: &[u8],
+        size: u64,
+    ) -> io::Result<[u8; ISIZE]> {
         let bs = self.bs as usize;
         let mut list = Vec::new();
         for i in 0..size.div_ceil(self.bs) as usize {
@@ -255,7 +272,11 @@ impl Fs {
             put32(&mut r, at, self.now);
         }
         put16(&mut r, 0x1A, links);
-        put32(&mut r, 0x1C, ((list.len() as u64 + meta) * self.bs / 512) as u32);
+        put32(
+            &mut r,
+            0x1C,
+            ((list.len() as u64 + meta) * self.bs / 512) as u32,
+        );
         put32(&mut r, 0x6C, (size >> 32) as u32);
         put16(&mut r, 0x80, 32); // i_extra_isize
         if self.ext4 {
@@ -285,7 +306,14 @@ fn journal_blocks(blocks: u64) -> u64 {
 /// lost+found, the given label (<=16 bytes), block size (0 = default: 1024
 /// below 512 MiB, else 4096, like mke2fs), and the given small files placed
 /// in the root directory.
-pub fn format<D: Write + Seek>(dev: &mut D, size: u64, kind: Kind, label: &str, block_size: u32, files: &[(&str, &[u8])]) -> io::Result<()> {
+pub fn format<D: Write + Seek>(
+    dev: &mut D,
+    size: u64,
+    kind: Kind,
+    label: &str,
+    block_size: u32,
+    files: &[(&str, &[u8])],
+) -> io::Result<()> {
     let bs = match block_size {
         0 if size < 512 << 20 => 1024,
         0 => 4096,
@@ -296,7 +324,11 @@ pub fn format<D: Write + Seek>(dev: &mut D, size: u64, kind: Kind, label: &str, 
         return Err(invalid("label longer than 16 bytes"));
     }
     for (name, _) in files {
-        if name.is_empty() || name.len() > 255 || name.contains(['/', '\0']) || [".", "..", "lost+found"].contains(name) {
+        if name.is_empty()
+            || name.len() > 255
+            || name.contains(['/', '\0'])
+            || [".", "..", "lost+found"].contains(name)
+        {
             return Err(invalid("invalid file name"));
         }
     }
@@ -310,15 +342,38 @@ pub fn format<D: Write + Seek>(dev: &mut D, size: u64, kind: Kind, label: &str, 
     }
     let first = (bs == 1024) as u64;
     let bpg = 8 * bs;
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs() as u32;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as u32;
     let uuid = random16();
-    let mut fs = Fs { bs, first, bpg, blocks, groups: 0, ipg: 0, itb: 0, gdtb: 0, ext4, seed: crc32c(!0, &uuid), now, used: vec![], g: 0, next: 0, data: BTreeMap::new() };
+    let mut fs = Fs {
+        bs,
+        first,
+        bpg,
+        blocks,
+        groups: 0,
+        ipg: 0,
+        itb: 0,
+        gdtb: 0,
+        ext4,
+        seed: crc32c(!0, &uuid),
+        now,
+        used: vec![],
+        g: 0,
+        next: 0,
+        data: BTreeMap::new(),
+    };
     let ratio = if size < 512 << 20 { 4096 } else { 16384 };
     let nfiles = files.len() as u64;
     fs.groups = (blocks - first).div_ceil(bpg);
     loop {
         fs.gdtb = (fs.groups * 32).div_ceil(bs);
-        fs.ipg = (blocks * bs / ratio).div_ceil(fs.groups).max(16 + nfiles).next_multiple_of((bs / ISIZE as u64).max(8)).min(bpg);
+        fs.ipg = (blocks * bs / ratio)
+            .div_ceil(fs.groups)
+            .max(16 + nfiles)
+            .next_multiple_of((bs / ISIZE as u64).max(8))
+            .min(bpg);
         fs.itb = fs.ipg * ISIZE as u64 / bs;
         // Drop a last group too small to be worth its metadata, like mke2fs.
         let last = fs.groups - 1;
@@ -357,14 +412,28 @@ pub fn format<D: Write + Seek>(dev: &mut D, size: u64, kind: Kind, label: &str, 
     if journal {
         let jlen = journal_blocks(blocks);
         let mut jsb = vec![0u8; bs as usize];
-        for (at, v) in [(0, 0xC03B_3998), (4, 4), (12, bs as u32), (16, jlen as u32), (20, 1), (24, 1), (64, 1)] {
+        for (at, v) in [
+            (0, 0xC03B_3998),
+            (4, 4),
+            (12, bs as u32),
+            (16, jlen as u32),
+            (20, 1),
+            (24, 1),
+            (64, 1),
+        ] {
             jsb[at..at + 4].copy_from_slice(&u32::to_be_bytes(v));
         }
         jsb[48..64].copy_from_slice(&uuid);
         let j = fs.inode(8, 0x8180, 1, &jsb, jlen * bs)?;
         // Backup of the journal inode's block map, plus its size.
         sb[0x10C..0x148].copy_from_slice(&j[0x28..0x64]);
-        sb[0x148..0x150].copy_from_slice(&j[0x6C..0x70].iter().chain(&j[4..8]).copied().collect::<Vec<_>>());
+        sb[0x148..0x150].copy_from_slice(
+            &j[0x6C..0x70]
+                .iter()
+                .chain(&j[4..8])
+                .copied()
+                .collect::<Vec<_>>(),
+        );
         put32(&mut sb, 0xE0, 8);
         sb[0xFD] = 1;
         inodes.push((8, j));
@@ -422,15 +491,23 @@ pub fn format<D: Write + Seek>(dev: &mut D, size: u64, kind: Kind, label: &str, 
         (0x4C, 1),
         (0x54, 11),
         (0x5C, 0x28 | if journal { 4 } else { 0 }), // ext_attr, dir_index, has_journal
-        (0x60, 2 | if ext4 { 0x40 } else { 0 }),   // filetype, extents
-        (0x64, 3 | if ext4 { 0x468 } else { 0 }),  // sparse_super, large_file (+ huge_file, dir_nlink, extra_isize, metadata_csum)
-        (0x100, 0x0C),                             // user_xattr, acl
+        (0x60, 2 | if ext4 { 0x40 } else { 0 }),    // filetype, extents
+        (0x64, 3 | if ext4 { 0x468 } else { 0 }), // sparse_super, large_file (+ huge_file, dir_nlink, extra_isize, metadata_csum)
+        (0x100, 0x0C),                            // user_xattr, acl
         (0x108, now as u64),
         (0x160, 1), // signed directory hash
     ] {
         put32(&mut sb, at, v as u32);
     }
-    for (at, v) in [(0x36, 0xFFFF), (0x38, 0xEF53), (0x3A, 1), (0x3C, 1), (0x58, ISIZE as u16), (0x15C, 32), (0x15E, 32)] {
+    for (at, v) in [
+        (0x36, 0xFFFF),
+        (0x38, 0xEF53),
+        (0x3A, 1),
+        (0x3C, 1),
+        (0x58, ISIZE as u16),
+        (0x15C, 32),
+        (0x15E, 32),
+    ] {
         put16(&mut sb, at, v);
     }
     sb[0x68..0x78].copy_from_slice(&uuid);
@@ -516,27 +593,57 @@ mod tests {
     fn e2fsck_clean() {
         let run = |cmd: &str, args: &[&str], img: &std::path::Path| {
             let o = Command::new(cmd).args(args).arg(img).output().unwrap();
-            let text = String::from_utf8_lossy(&o.stdout).into_owned() + &String::from_utf8_lossy(&o.stderr);
+            let text = String::from_utf8_lossy(&o.stdout).into_owned()
+                + &String::from_utf8_lossy(&o.stderr);
             (o.status.success(), o.stdout, text)
         };
-        if ["e2fsck", "dumpe2fs", "debugfs"].iter().any(|t| Command::new(t).arg("-V").output().is_err()) {
+        if ["e2fsck", "dumpe2fs", "debugfs"]
+            .iter()
+            .any(|t| Command::new(t).arg("-V").output().is_err())
+        {
             eprintln!("e2fsprogs not installed, skipping");
             return;
         }
         let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
         for kind in [Kind::Ext2, Kind::Ext3, Kind::Ext4] {
             for (size, bs) in [(64u64 << 20, 1024), (300 << 20, 0), (2 << 30, 4096)] {
-                let path = std::env::temp_dir().join(format!("rustfus-ext-{}-{kind:?}-{size}", std::process::id()));
-                let mut f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path).unwrap();
+                let path = std::env::temp_dir().join(format!(
+                    "rustfus-ext-{}-{kind:?}-{size}",
+                    std::process::id()
+                ));
+                let mut f = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&path)
+                    .unwrap();
                 f.set_len(size).unwrap();
-                format(&mut f, size, kind, "persistence", bs, &[("persistence.conf", b"/ union\n"), ("big.bin", &big)]).unwrap();
+                format(
+                    &mut f,
+                    size,
+                    kind,
+                    "persistence",
+                    bs,
+                    &[("persistence.conf", b"/ union\n"), ("big.bin", &big)],
+                )
+                .unwrap();
                 drop(f);
                 let (ok, _, out) = run("e2fsck", &["-fn"], &path);
                 assert!(ok && !out.contains("Fix?"), "{kind:?} {size}: {out}");
                 let (_, _, out) = run("dumpe2fs", &["-h"], &path);
-                assert!(out.contains("Filesystem volume name:   persistence\n"), "{out}");
-                assert_eq!(run("debugfs", &["-R", "cat /persistence.conf"], &path).1, b"/ union\n");
-                assert!(run("debugfs", &["-R", "cat /big.bin"], &path).1 == big, "{kind:?} {size}: big.bin differs");
+                assert!(
+                    out.contains("Filesystem volume name:   persistence\n"),
+                    "{out}"
+                );
+                assert_eq!(
+                    run("debugfs", &["-R", "cat /persistence.conf"], &path).1,
+                    b"/ union\n"
+                );
+                assert!(
+                    run("debugfs", &["-R", "cat /big.bin"], &path).1 == big,
+                    "{kind:?} {size}: big.bin differs"
+                );
                 std::fs::remove_file(path).ok();
             }
         }

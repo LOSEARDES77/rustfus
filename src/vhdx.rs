@@ -27,7 +27,11 @@ const CRC_TABLE: [u32; 256] = {
         let mut c = i as u32;
         let mut k = 0;
         while k < 8 {
-            c = if c & 1 != 0 { (c >> 1) ^ 0x82F6_3B78 } else { c >> 1 };
+            c = if c & 1 != 0 {
+                (c >> 1) ^ 0x82F6_3B78
+            } else {
+                c >> 1
+            };
             k += 1;
         }
         t[i] = c;
@@ -37,7 +41,9 @@ const CRC_TABLE: [u32; 256] = {
 };
 
 pub fn crc32c(data: &[u8]) -> u32 {
-    !data.iter().fold(!0u32, |c, &b| CRC_TABLE[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8))
+    !data.iter().fold(!0u32, |c, &b| {
+        CRC_TABLE[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8)
+    })
 }
 
 /// Stores the CRC-32C of `buf` (with the checksum field zeroed) at offset 4.
@@ -102,9 +108,16 @@ fn bat_index(b: u64, cr: u64) -> usize {
 
 /// Writes `size` bytes of `src` as a dynamic VHDX; all-zero blocks are left out.
 /// `tick` gets the bytes consumed so far and may abort by returning an error.
-pub fn save(src: &mut impl Read, dst: &mut File, size: u64, tick: &dyn Fn(u64) -> io::Result<()>) -> io::Result<()> {
+pub fn save(
+    src: &mut impl Read,
+    dst: &mut File,
+    size: u64,
+    tick: &dyn Fn(u64) -> io::Result<()>,
+) -> io::Result<()> {
     if size == 0 || !size.is_multiple_of(SECTOR) {
-        return Err(invalid("VHDX disk size must be a non-zero multiple of 512 bytes"));
+        return Err(invalid(
+            "VHDX disk size must be a non-zero multiple of 512 bytes",
+        ));
     }
     let (log_off, meta_off, bat_off) = (MB, 2 * MB, 3 * MB);
     let blocks = size.div_ceil(BLOCK);
@@ -132,7 +145,10 @@ pub fn save(src: &mut impl Read, dst: &mut File, size: u64, tick: &dyn Fn(u64) -
 
     let mut head = vec![0u8; 256 * KB + 64 * KB];
     put(&mut head, 0, b"vhdxfile");
-    let creator: Vec<u8> = "rustfus".encode_utf16().flat_map(u16::to_le_bytes).collect();
+    let creator: Vec<u8> = "rustfus"
+        .encode_utf16()
+        .flat_map(u16::to_le_bytes)
+        .collect();
     put(&mut head, 8, &creator);
     let (fw, dw) = (random_guid(), random_guid());
     for (seq, off) in [(1u64, 64 * KB), (2, 128 * KB)] {
@@ -150,7 +166,10 @@ pub fn save(src: &mut impl Read, dst: &mut File, size: u64, tick: &dyn Fn(u64) -
     let mut rt = vec![0u8; 64 * KB];
     put(&mut rt, 0, b"regi");
     put(&mut rt, 8, &2u32.to_le_bytes());
-    for (i, (id, off, len)) in [(BAT_GUID, bat_off, bat_len), (META_GUID, meta_off, MB)].into_iter().enumerate() {
+    for (i, (id, off, len)) in [(BAT_GUID, bat_off, bat_len), (META_GUID, meta_off, MB)]
+        .into_iter()
+        .enumerate()
+    {
         let e = 16 + i * 32;
         put(&mut rt, e, &guid(id));
         put(&mut rt, e + 16, &off.to_le_bytes());
@@ -164,7 +183,11 @@ pub fn save(src: &mut impl Read, dst: &mut File, size: u64, tick: &dyn Fn(u64) -
     let mut meta = vec![0u8; MB as usize];
     put(&mut meta, 0, b"metadata");
     let items: [(&str, u32, Vec<u8>); 5] = [
-        (FILE_PARAMS, 4, [(BLOCK as u32).to_le_bytes(), [0; 4]].concat()),
+        (
+            FILE_PARAMS,
+            4,
+            [(BLOCK as u32).to_le_bytes(), [0; 4]].concat(),
+        ),
         (DISK_SIZE, 6, size.to_le_bytes().to_vec()),
         (PAGE83, 6, random_guid().to_vec()),
         (LOGICAL_SECTOR, 6, (SECTOR as u32).to_le_bytes().to_vec()),
@@ -206,7 +229,9 @@ impl Read for Sparse {
             return Ok(0);
         }
         let (b, off) = (self.pos / self.block, self.pos % self.block);
-        let n = (buf.len() as u64).min(self.block - off).min(self.size - self.pos) as usize;
+        let n = (buf.len() as u64)
+            .min(self.block - off)
+            .min(self.size - self.pos) as usize;
         match self.map.get(b as usize).copied().flatten() {
             Some(at) => {
                 self.f.seek(SeekFrom::Start(at + off))?;
@@ -242,8 +267,13 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
         // Any log entry tagged with the active log GUID may hold unapplied writes.
         let (log_off, log_len) = (u64_at(h, 72), u32_at(h, 68) as usize);
         let log = read_at(&mut f, log_off, log_len)?;
-        if log.chunks(4 * KB).any(|e| e.len() >= 48 && &e[..4] == b"loge" && &e[32..48] == log_guid) {
-            return Err(invalid("VHDX has a pending log; open it once with Hyper-V or qemu-img to replay it"));
+        if log
+            .chunks(4 * KB)
+            .any(|e| e.len() >= 48 && &e[..4] == b"loge" && &e[32..48] == log_guid)
+        {
+            return Err(invalid(
+                "VHDX has a pending log; open it once with Hyper-V or qemu-img to replay it",
+            ));
         }
     }
     let rt = [192 * KB, 256 * KB]
@@ -272,16 +302,25 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
     };
     let params = item(FILE_PARAMS, 8)?;
     if u32_at(params, 4) & 2 != 0 {
-        return Err(invalid("Differencing VHDX images are not supported; merge or convert it first"));
+        return Err(invalid(
+            "Differencing VHDX images are not supported; merge or convert it first",
+        ));
     }
     let (block, size) = (u32_at(params, 0) as u64, u64_at(item(DISK_SIZE, 8)?, 0));
     let sector = u32_at(item(LOGICAL_SECTOR, 4)?, 0) as u64;
-    if !(MB..=256 * MB).contains(&block) || !block.is_power_of_two() || ![512, 4096].contains(&sector) {
+    if !(MB..=256 * MB).contains(&block)
+        || !block.is_power_of_two()
+        || ![512, 4096].contains(&sector)
+    {
         return Err(invalid("Unsupported VHDX block or sector size"));
     }
     let blocks = size.div_ceil(block);
     let cr = chunk_ratio(block, sector);
-    let entries = if blocks == 0 { 0 } else { blocks + (blocks - 1) / cr };
+    let entries = if blocks == 0 {
+        0
+    } else {
+        blocks + (blocks - 1) / cr
+    };
     if entries * 8 > bat_len as u64 {
         return Err(invalid("VHDX BAT is too small for the disk size"));
     }
@@ -293,14 +332,21 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
             _ => Ok(None),
         })
         .collect::<io::Result<_>>()?;
-    Ok(Sparse { f, size, block, map, pos: 0 })
+    Ok(Sparse {
+        f,
+        size,
+        block,
+        map,
+        pos: 0,
+    })
 }
 
 /// Dynamic VHD (disk type 3), given its footer.
 pub fn open_vhd_dynamic(mut f: File, footer: &[u8]) -> io::Result<Sparse> {
     let be32 = |b: &[u8], o: usize| u32::from_be_bytes(b[o..o + 4].try_into().unwrap());
     let be64 = |b: &[u8], o: usize| u64::from_be_bytes(b[o..o + 8].try_into().unwrap());
-    let dh = read_at(&mut f, be64(footer, 16), 1024).map_err(|_| invalid("VHD dynamic header is missing"))?;
+    let dh = read_at(&mut f, be64(footer, 16), 1024)
+        .map_err(|_| invalid("VHD dynamic header is missing"))?;
     if &dh[..8] != b"cxsparse" {
         return Err(invalid("VHD dynamic header is corrupted"));
     }
@@ -318,7 +364,13 @@ pub fn open_vhd_dynamic(mut f: File, footer: &[u8]) -> io::Result<Sparse> {
             s => Some(s as u64 * SECTOR + bitmap),
         })
         .collect();
-    Ok(Sparse { f, size, block, map, pos: 0 })
+    Ok(Sparse {
+        f,
+        size,
+        block,
+        map,
+        pos: 0,
+    })
 }
 
 #[cfg(test)]

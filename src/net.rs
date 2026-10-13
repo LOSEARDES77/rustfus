@@ -30,14 +30,25 @@ pub fn cache_dir() -> PathBuf {
 
 fn curl() -> Command {
     let mut c = Command::new(if cfg!(windows) { "curl.exe" } else { "curl" });
-    c.args(["-fsSL", "--proto", "=https", "--retry", "2", "--connect-timeout", "15"]);
+    c.args([
+        "-fsSL",
+        "--proto",
+        "=https",
+        "--retry",
+        "2",
+        "--connect-timeout",
+        "15",
+    ]);
     c
 }
 
 pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
     let out = curl().arg(url).output().map_err(|e| format!("curl: {e}"))?;
     if !out.status.success() {
-        return Err(format!("download of {url} failed: {}", String::from_utf8_lossy(&out.stderr).trim()));
+        return Err(format!(
+            "download of {url} failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ));
     }
     Ok(out.stdout)
 }
@@ -45,11 +56,20 @@ pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
 /// RSA-2048 PKCS#1 v1.5 / SHA-256 check against Rufus' public key.
 pub fn verify(data: &[u8], sig: &[u8]) -> bool {
     // DER DigestInfo prefix for SHA-256.
-    const PREFIX: [u8; 19] = [0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20];
-    let Ok(key) = RsaPublicKey::new(BigUint::from_bytes_be(RUFUS_PUBKEY), BigUint::from(65537u32)) else {
+    const PREFIX: [u8; 19] = [
+        0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01,
+        0x05, 0x00, 0x04, 0x20,
+    ];
+    let Ok(key) = RsaPublicKey::new(
+        BigUint::from_bytes_be(RUFUS_PUBKEY),
+        BigUint::from(65537u32),
+    ) else {
         return false;
     };
-    let scheme = Pkcs1v15Sign { hash_len: Some(32), prefix: Box::new(PREFIX) };
+    let scheme = Pkcs1v15Sign {
+        hash_len: Some(32),
+        prefix: Box::new(PREFIX),
+    };
     key.verify(scheme, &Sha256::digest(data), sig).is_ok()
 }
 
@@ -57,7 +77,12 @@ pub fn verify(data: &[u8], sig: &[u8]) -> bool {
 /// `cache_dir()/rel`. Cached copies are re-verified on every use.
 pub fn fetch_signed(url: &str, rel: &str) -> Result<Vec<u8>, String> {
     let path = cache_dir().join(rel);
-    let sig_path = path.with_extension(format!("{}sig", path.extension().map(|e| format!("{}.", e.to_string_lossy())).unwrap_or_default()));
+    let sig_path = path.with_extension(format!(
+        "{}sig",
+        path.extension()
+            .map(|e| format!("{}.", e.to_string_lossy()))
+            .unwrap_or_default()
+    ));
     if let (Ok(d), Ok(s)) = (std::fs::read(&path), std::fs::read(&sig_path))
         && verify(&d, &s)
     {
@@ -78,7 +103,12 @@ pub fn fetch_signed(url: &str, rel: &str) -> Result<Vec<u8>, String> {
 
 /// Downloads a large file to `dest`, reporting progress from the growing
 /// file size against the server's Content-Length.
-pub fn download(url: &str, dest: &Path, progress: &dyn Fn(f32, u64), cancel: &AtomicBool) -> Result<(), String> {
+pub fn download(
+    url: &str,
+    dest: &Path,
+    progress: &dyn Fn(f32, u64),
+    cancel: &AtomicBool,
+) -> Result<(), String> {
     let total = curl()
         .args(["-I", url])
         .output()
@@ -86,7 +116,11 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(f32, u64), cancel: &At
         .and_then(|o| {
             String::from_utf8_lossy(&o.stdout)
                 .lines()
-                .filter_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").and_then(|v| v.trim().parse::<u64>().ok()))
+                .filter_map(|l| {
+                    l.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|v| v.trim().parse::<u64>().ok())
+                })
                 .next_back()
         })
         .unwrap_or(0);
@@ -117,7 +151,14 @@ pub fn download(url: &str, dest: &Path, progress: &dyn Fn(f32, u64), cancel: &At
             return Ok(());
         }
         let got = std::fs::metadata(dest).map(|m| m.len()).unwrap_or(0);
-        progress(if total > 0 { got as f32 / total as f32 } else { 0.0 }, got);
+        progress(
+            if total > 0 {
+                got as f32 / total as f32
+            } else {
+                0.0
+            },
+            got,
+        );
         std::thread::sleep(Duration::from_millis(250));
     }
 }

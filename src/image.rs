@@ -38,7 +38,10 @@ impl<R: Read> Read for Counted<R> {
 }
 
 fn ext(path: &Path) -> String {
-    path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
+    path.extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase()
 }
 
 pub fn is_compressed(path: &Path) -> bool {
@@ -52,7 +55,15 @@ fn invalid(msg: impl Into<String>) -> io::Error {
 /// Sparse virtual disks report progress in virtual bytes.
 fn sparse(s: crate::vhdx::Sparse) -> Source {
     let (size, consumed) = (s.size, Arc::new(AtomicU64::new(0)));
-    Source { reader: Box::new(Counted { inner: s, n: consumed.clone() }), size: Some(size), consumed, total: size }
+    Source {
+        reader: Box::new(Counted {
+            inner: s,
+            n: consumed.clone(),
+        }),
+        size: Some(size),
+        consumed,
+        total: size,
+    }
 }
 
 pub fn open(path: &Path) -> io::Result<Source> {
@@ -77,7 +88,11 @@ pub fn open(path: &Path) -> io::Result<Source> {
             match u32::from_be_bytes(footer[60..64].try_into().unwrap()) {
                 2 => {}
                 3 => return crate::vhdx::open_vhd_dynamic(f, &footer).map(sparse),
-                4 => return Err(invalid("Differencing VHDs are not supported; convert to a fixed VHD first")),
+                4 => {
+                    return Err(invalid(
+                        "Differencing VHDs are not supported; convert to a fixed VHD first",
+                    ));
+                }
                 t => return Err(invalid(format!("Unknown VHD disk type {t}"))),
             }
             limit = total - 512;
@@ -105,7 +120,14 @@ pub fn open(path: &Path) -> io::Result<Source> {
     }
     f.seek(SeekFrom::Start(start))?;
     consumed.store(start, Ordering::Relaxed);
-    let raw = BufReader::with_capacity(1 << 20, Counted { inner: f, n: consumed.clone() }.take(limit));
+    let raw = BufReader::with_capacity(
+        1 << 20,
+        Counted {
+            inner: f,
+            n: consumed.clone(),
+        }
+        .take(limit),
+    );
     let reader: Box<dyn Read + Send> = match ext(path).as_str() {
         "gz" => Box::new(flate2::read::MultiGzDecoder::new(raw)),
         "bz2" => Box::new(bzip2::read::MultiBzDecoder::new(raw)),
@@ -114,12 +136,23 @@ pub fn open(path: &Path) -> io::Result<Source> {
         "zst" => Box::new(ruzstd::decoding::StreamingDecoder::new(raw).map_err(io::Error::other)?),
         "zip" => match zip_method {
             Some(zip::CompressionMethod::Stored) => Box::new(raw),
-            Some(zip::CompressionMethod::Deflated) => Box::new(flate2::read::DeflateDecoder::new(raw)),
-            m => return Err(invalid(format!("Unsupported ZIP compression {m:?} (only Stored/Deflate)"))),
+            Some(zip::CompressionMethod::Deflated) => {
+                Box::new(flate2::read::DeflateDecoder::new(raw))
+            }
+            m => {
+                return Err(invalid(format!(
+                    "Unsupported ZIP compression {m:?} (only Stored/Deflate)"
+                )));
+            }
         },
         _ => Box::new(raw),
     };
-    Ok(Source { reader, size, consumed, total })
+    Ok(Source {
+        reader,
+        size,
+        consumed,
+        total,
+    })
 }
 
 pub fn hex(b: &[u8]) -> String {
@@ -135,8 +168,12 @@ pub fn hashes(path: &Path, progress: &dyn Fn(f32), cancel: &AtomicBool) -> io::R
     use sha2::Digest;
     let mut f = File::open(path)?;
     let total = f.metadata()?.len().max(1);
-    let (mut md5, mut sha1, mut sha256, mut sha512) =
-        (md5::Md5::new(), sha1::Sha1::new(), sha2::Sha256::new(), sha2::Sha512::new());
+    let (mut md5, mut sha1, mut sha256, mut sha512) = (
+        md5::Md5::new(),
+        sha1::Sha1::new(),
+        sha2::Sha256::new(),
+        sha2::Sha512::new(),
+    );
     let mut buf = vec![0u8; CHUNK];
     let mut done = 0u64;
     // ponytail: hashes run sequentially per chunk; one thread per hash if this becomes the bottleneck.
@@ -157,7 +194,12 @@ pub fn hashes(path: &Path, progress: &dyn Fn(f32), cancel: &AtomicBool) -> io::R
         done += n as u64;
         progress(done as f32 / total as f32);
     }
-    Ok([hex(&md5.finalize()), hex(&sha1.finalize()), hex(&sha256.finalize()), hex(&sha512.finalize())])
+    Ok([
+        hex(&md5.finalize()),
+        hex(&sha1.finalize()),
+        hex(&sha256.finalize()),
+        hex(&sha512.finalize()),
+    ])
 }
 
 /// Without this, Linux would read back the page cache instead of the device.
@@ -206,7 +248,9 @@ fn pattern_fill(buf: &mut [u8], pat: u32) {
     }
     let b = pat.to_be_bytes();
     let b = &b[b.iter().position(|&x| x != 0).unwrap_or(3)..];
-    buf.iter_mut().zip(b.iter().cycle()).for_each(|(d, s)| *d = *s);
+    buf.iter_mut()
+        .zip(b.iter().cycle())
+        .for_each(|(d, s)| *d = *s);
 }
 
 /// Stamps each sector with its number so fake (wrap-around) drives show up as corruption.
@@ -224,7 +268,10 @@ fn chunk_io(
     buf: &mut [u8],
     op: fn(&mut File, &mut [u8]) -> io::Result<()>,
 ) -> Vec<u64> {
-    if f.seek(SeekFrom::Start(off)).and_then(|_| op(f, buf)).is_ok() {
+    if f.seek(SeekFrom::Start(off))
+        .and_then(|_| op(f, buf))
+        .is_ok()
+    {
         return vec![];
     }
     let mut bad = vec![];
@@ -255,7 +302,11 @@ pub fn bad_blocks(
     let steps = (pats.len() * 2) as f32;
     'test: for (p, &pat) in pats.iter().enumerate() {
         pattern_fill(&mut pbuf, pat);
-        let name = if pat == RANDOM { "random data".into() } else { format!("0x{pat:02X}") };
+        let name = if pat == RANDOM {
+            "random data".into()
+        } else {
+            format!("0x{pat:02X}")
+        };
         for phase in 0..2 {
             let mut off = 0u64;
             while off < size {
@@ -272,7 +323,11 @@ pub fn bad_blocks(
                 } else {
                     let errs = chunk_io(&mut f, off, &mut rbuf[..len], |f, b| f.read_exact(b));
                     r.read_errors += errs.len() as u64;
-                    for (i, (a, b)) in wbuf[..len].chunks(SECTOR).zip(rbuf[..len].chunks(SECTOR)).enumerate() {
+                    for (i, (a, b)) in wbuf[..len]
+                        .chunks(SECTOR)
+                        .zip(rbuf[..len].chunks(SECTOR))
+                        .enumerate()
+                    {
                         let sector = off / SECTOR as u64 + i as u64;
                         if a != b && !errs.contains(&sector) {
                             r.corruption_errors += 1;
@@ -286,7 +341,12 @@ pub fn bad_blocks(
                 let what = if phase == 0 { "Writing" } else { "Verifying" };
                 progress(
                     ((p * 2 + phase) as f32 + frac) / steps,
-                    format!("Pass {}/{}: {what} {name} ({:.1}%)", p + 1, pats.len(), frac * 100.0),
+                    format!(
+                        "Pass {}/{}: {what} {name} ({:.1}%)",
+                        p + 1,
+                        pats.len(),
+                        frac * 100.0
+                    ),
                 );
                 if bad.len() >= MAX_BAD_BLOCKS {
                     progress(1.0, "Too many bad blocks, aborting test".into());
@@ -330,7 +390,9 @@ fn vhd_geometry(size: u64) -> (u16, u8, u8) {
 
 fn vhd_footer(size: u64) -> [u8; 512] {
     let mut f = [0u8; 512];
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
     let (c, h, s) = vhd_geometry(size);
     f[..8].copy_from_slice(b"conectix");
     f[8..12].copy_from_slice(&2u32.to_be_bytes()); // features: reserved bit
@@ -362,23 +424,41 @@ pub fn is_ffu(path: &Path) -> bool {
 fn dism(args: &str) -> io::Result<()> {
     use std::os::windows::process::CommandExt;
     let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-    let st = std::process::Command::new(format!(r"{root}\System32\dism.exe")).raw_arg(args).status()?;
-    if st.success() { Ok(()) } else { Err(io::Error::other(format!("dism failed ({st})"))) }
+    let st = std::process::Command::new(format!(r"{root}\System32\dism.exe"))
+        .raw_arg(args)
+        .status()?;
+    if st.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!("dism failed ({st})")))
+    }
 }
 
 #[cfg(not(windows))]
 fn dism(_: &str) -> io::Result<()> {
-    Err(io::Error::new(io::ErrorKind::Unsupported, "FFU images require Windows (dism)"))
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "FFU images require Windows (dism)",
+    ))
 }
 
 /// Writes an FFU image to `dev` (`\\.\PhysicalDriveN`) with dism, like Rufus.
 pub fn apply_ffu(path: &Path, dev: &str) -> io::Result<()> {
-    dism(&format!("/Apply-Ffu /ApplyDrive:{dev} /ImageFile:\"{}\"", path.display()))
+    dism(&format!(
+        "/Apply-Ffu /ApplyDrive:{dev} /ImageFile:\"{}\"",
+        path.display()
+    ))
 }
 
 /// Dumps the whole device to `out`: `.vhd` gets a fixed-VHD footer, `.vhdx`
 /// becomes a dynamic VHDX, `.ffu` is captured with dism (Windows only).
-pub fn save_image(dev: &str, size: u64, out: &Path, progress: &dyn Fn(f32), cancel: &AtomicBool) -> io::Result<()> {
+pub fn save_image(
+    dev: &str,
+    size: u64,
+    out: &Path,
+    progress: &dyn Fn(f32),
+    cancel: &AtomicBool,
+) -> io::Result<()> {
     if is_ffu(out) {
         progress(0.0);
         let r = dism(&format!(
@@ -394,7 +474,11 @@ pub fn save_image(dev: &str, size: u64, out: &Path, progress: &dyn Fn(f32), canc
         if ext(out) == "vhdx" {
             let tick = |done: u64| {
                 progress(done as f32 / size as f32);
-                if cancel.load(Ordering::Relaxed) { Err(interrupted()) } else { Ok(()) }
+                if cancel.load(Ordering::Relaxed) {
+                    Err(interrupted())
+                } else {
+                    Ok(())
+                }
             };
             crate::vhdx::save(&mut src, &mut dst, size, &tick)?;
             return dst.sync_all();
@@ -432,7 +516,9 @@ mod tests {
     }
 
     fn data() -> Vec<u8> {
-        (0..300_000u32).map(|i| (i % 251) as u8 ^ (i >> 10) as u8).collect()
+        (0..300_000u32)
+            .map(|i| (i % 251) as u8 ^ (i >> 10) as u8)
+            .collect()
     }
 
     fn roundtrip(name: &str, bytes: &[u8]) -> Vec<u8> {
@@ -458,19 +544,25 @@ mod tests {
         bz.write_all(&d).unwrap();
         assert_eq!(roundtrip("a.img.bz2", &bz.finish().unwrap()), d);
 
-        let mut xz = lzma_rust2::XzWriter::new(vec![], lzma_rust2::XzOptions::with_preset(1)).unwrap();
+        let mut xz =
+            lzma_rust2::XzWriter::new(vec![], lzma_rust2::XzOptions::with_preset(1)).unwrap();
         xz.write_all(&d).unwrap();
         assert_eq!(roundtrip("a.img.xz", &xz.finish().unwrap()), d);
 
         let opts = lzma_rust2::LzmaOptions::with_preset(1);
-        let mut lz = lzma_rust2::LzmaWriter::new_use_header(vec![], &opts, Some(d.len() as u64)).unwrap();
+        let mut lz =
+            lzma_rust2::LzmaWriter::new_use_header(vec![], &opts, Some(d.len() as u64)).unwrap();
         lz.write_all(&d).unwrap();
         assert_eq!(roundtrip("a.img.lzma", &lz.finish().unwrap()), d);
 
-        let zst = ruzstd::encoding::compress_to_vec(&d[..], ruzstd::encoding::CompressionLevel::Fastest);
+        let zst =
+            ruzstd::encoding::compress_to_vec(&d[..], ruzstd::encoding::CompressionLevel::Fastest);
         assert_eq!(roundtrip("a.img.zst", &zst), d);
 
-        for method in [zip::CompressionMethod::Stored, zip::CompressionMethod::Deflated] {
+        for method in [
+            zip::CompressionMethod::Stored,
+            zip::CompressionMethod::Deflated,
+        ] {
             let mut z = zip::ZipWriter::new(io::Cursor::new(vec![]));
             let o = zip::write::SimpleFileOptions::default().compression_method(method);
             z.add_directory("dir/", o).unwrap();
@@ -505,7 +597,10 @@ mod tests {
         std::fs::remove_file(&p).ok();
         assert_eq!(h[0], "900150983cd24fb0d6963f7d28e17f72");
         assert_eq!(h[1], "a9993e364706816aba3e25717850c26c9cd0d89d");
-        assert_eq!(h[2], "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+        assert_eq!(
+            h[2],
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
         assert!(h[3].starts_with("ddaf35a193617aba") && h[3].ends_with("a54ca49f"));
         assert!(hashes(&p, &|_| {}, &AtomicBool::new(true)).is_err());
     }
@@ -515,7 +610,14 @@ mod tests {
         let p = tmp("bb.bin");
         File::create(&p).unwrap().set_len((5 << 20) + 1536).unwrap();
         for (mode, (label, _)) in BAD_BLOCK_MODES.iter().enumerate() {
-            let r = bad_blocks(p.to_str().unwrap(), (5 << 20) + 1536, mode, &|_, _| {}, &AtomicBool::new(false)).unwrap();
+            let r = bad_blocks(
+                p.to_str().unwrap(),
+                (5 << 20) + 1536,
+                mode,
+                &|_, _| {},
+                &AtomicBool::new(false),
+            )
+            .unwrap();
             assert_eq!(r, BadBlocks::default(), "{label}");
         }
         std::fs::remove_file(&p).ok();
@@ -527,7 +629,11 @@ mod tests {
     }
 
     fn qemu_img(args: &[&str]) -> Option<bool> {
-        std::process::Command::new("qemu-img").args(args).output().ok().map(|o| o.status.success())
+        std::process::Command::new("qemu-img")
+            .args(args)
+            .output()
+            .ok()
+            .map(|o| o.status.success())
     }
 
     fn read_all(p: &Path) -> Vec<u8> {
@@ -543,10 +649,20 @@ mod tests {
         let (dev, out) = (tmp("vdev.bin"), tmp("out.vhdx"));
         let mut d = vec![0u8; 70 << 20];
         for (at, len) in [(0, 4096), (20 << 20, 1 << 20), ((70 << 20) - 512, 512)] {
-            d[at..at + len].iter_mut().enumerate().for_each(|(i, b)| *b = (i % 251) as u8 + 1);
+            d[at..at + len]
+                .iter_mut()
+                .enumerate()
+                .for_each(|(i, b)| *b = (i % 251) as u8 + 1);
         }
         std::fs::write(&dev, &d).unwrap();
-        save_image(dev.to_str().unwrap(), d.len() as u64, &out, &|_| {}, &AtomicBool::new(false)).unwrap();
+        save_image(
+            dev.to_str().unwrap(),
+            d.len() as u64,
+            &out,
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         let v = std::fs::read(&out).unwrap();
         // 3 blocks of 32 MiB, the middle one all zero: 2 payload blocks + 4 MiB of headers/log/metadata/BAT.
         assert_eq!(v.len(), (4 + 64) << 20);
@@ -568,7 +684,10 @@ mod tests {
         let (o, ds) = (out.to_str().unwrap(), dev.to_str().unwrap());
         if qemu_img(&["--version"]).is_some() {
             assert_eq!(qemu_img(&["check", "-f", "vhdx", o]), Some(true));
-            assert_eq!(qemu_img(&["compare", "-f", "vhdx", "-F", "raw", o, ds]), Some(true));
+            assert_eq!(
+                qemu_img(&["compare", "-f", "vhdx", "-F", "raw", o, ds]),
+                Some(true)
+            );
         }
         std::fs::remove_file(&dev).ok();
         std::fs::remove_file(&out).ok();
@@ -579,14 +698,37 @@ mod tests {
         let (raw, vhd, vhdx) = (tmp("q.raw"), tmp("q.vhd"), tmp("q.vhdx"));
         let mut d = vec![0u8; 9 << 20];
         d[..1000].fill(0xab);
-        d[(5 << 20) + 7..(6 << 20) + 9].iter_mut().enumerate().for_each(|(i, b)| *b = i as u8);
+        d[(5 << 20) + 7..(6 << 20) + 9]
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, b)| *b = i as u8);
         std::fs::write(&raw, &d).unwrap();
         let r = raw.to_str().unwrap();
-        if qemu_img(&["convert", "-f", "raw", "-O", "vpc", "-o", "subformat=dynamic,force_size=on", r, vhd.to_str().unwrap()])
-            == Some(true)
+        if qemu_img(&[
+            "convert",
+            "-f",
+            "raw",
+            "-O",
+            "vpc",
+            "-o",
+            "subformat=dynamic,force_size=on",
+            r,
+            vhd.to_str().unwrap(),
+        ]) == Some(true)
         {
             assert!(read_all(&vhd) == d);
-            assert_eq!(qemu_img(&["convert", "-f", "raw", "-O", "vhdx", r, vhdx.to_str().unwrap()]), Some(true));
+            assert_eq!(
+                qemu_img(&[
+                    "convert",
+                    "-f",
+                    "raw",
+                    "-O",
+                    "vhdx",
+                    r,
+                    vhdx.to_str().unwrap()
+                ]),
+                Some(true)
+            );
             assert!(read_all(&vhdx) == d);
         } else {
             // Hand-made dynamic VHD: 2 MiB disk, 1 MiB blocks, only block 1 allocated.
@@ -608,7 +750,10 @@ mod tests {
             v.extend_from_slice(&f);
             std::fs::write(&vhd, &v).unwrap();
             let got = read_all(&vhd);
-            assert!(got[..1 << 20].iter().all(|&b| b == 0) && got[1 << 20..] == v[2560..2560 + (1 << 20)]);
+            assert!(
+                got[..1 << 20].iter().all(|&b| b == 0)
+                    && got[1 << 20..] == v[2560..2560 + (1 << 20)]
+            );
         }
         for p in [raw, vhd, vhdx] {
             std::fs::remove_file(&p).ok();
@@ -627,7 +772,14 @@ mod tests {
         let (dev, out) = (tmp("dev.bin"), tmp("out.vhd"));
         let d: Vec<u8> = (0..(5u32 << 20) + 1024).map(|i| (i % 253) as u8).collect();
         std::fs::write(&dev, &d).unwrap();
-        save_image(dev.to_str().unwrap(), d.len() as u64, &out, &|_| {}, &AtomicBool::new(false)).unwrap();
+        save_image(
+            dev.to_str().unwrap(),
+            d.len() as u64,
+            &out,
+            &|_| {},
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         let v = std::fs::read(&out).unwrap();
         assert_eq!(v.len(), d.len() + 512);
         let mut footer = v[d.len()..].to_vec();

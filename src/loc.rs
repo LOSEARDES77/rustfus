@@ -50,12 +50,16 @@ fn quoted(s: &str) -> Option<(&str, &str)> {
 }
 
 fn parse(data: &str) -> Parsed {
-    let mut p = Parsed { langs: Vec::new(), strings: Vec::new() };
+    let mut p = Parsed {
+        langs: Vec::new(),
+        strings: Vec::new(),
+    };
     let mut last: Option<String> = None; // id of the last `t` line, for continuations
     for line in data.lines() {
         let l = line.trim_start();
         if l.starts_with('"') {
-            if let (Some(id), Some(map), Some((body, _))) = (&last, p.strings.last_mut(), quoted(l)) {
+            if let (Some(id), Some(map), Some((body, _))) = (&last, p.strings.last_mut(), quoted(l))
+            {
                 unescape(body, map.get_mut(id).unwrap());
             }
             continue;
@@ -64,15 +68,22 @@ fn parse(data: &str) -> Parsed {
         let (cmd, rest) = l.split_once([' ', '\t']).unwrap_or((l, ""));
         match cmd {
             "l" => {
-                let Some((code, rest)) = quoted(rest) else { continue };
+                let Some((code, rest)) = quoted(rest) else {
+                    continue;
+                };
                 let name = quoted(rest).map_or("", |q| q.0);
-                p.langs.push(Lang { code: code.into(), name: name.into() });
+                p.langs.push(Lang {
+                    code: code.into(),
+                    name: name.into(),
+                });
                 p.strings.push(HashMap::new());
             }
             "t" => {
                 let rest = rest.trim_start();
                 let id = rest.split_whitespace().next().unwrap_or("");
-                let (Some(map), Some((body, _))) = (p.strings.last_mut(), quoted(rest)) else { continue };
+                let (Some(map), Some((body, _))) = (p.strings.last_mut(), quoted(rest)) else {
+                    continue;
+                };
                 let mut s = String::new();
                 unescape(body, &mut s);
                 map.insert(id.into(), s);
@@ -90,11 +101,22 @@ fn parsed() -> &'static Parsed {
 
 /// All languages in file order (en-US first).
 pub fn languages() -> Vec<Lang> {
-    parsed().langs.iter().map(|l| Lang { code: l.code.clone(), name: l.name.clone() }).collect()
+    parsed()
+        .langs
+        .iter()
+        .map(|l| Lang {
+            code: l.code.clone(),
+            name: l.name.clone(),
+        })
+        .collect()
 }
 
 pub fn set_language(code: &str) {
-    let idx = parsed().langs.iter().position(|l| l.code.eq_ignore_ascii_case(code)).unwrap_or(0);
+    let idx = parsed()
+        .langs
+        .iter()
+        .position(|l| l.code.eq_ignore_ascii_case(code))
+        .unwrap_or(0);
     *CURRENT.write().unwrap() = idx;
 }
 
@@ -105,20 +127,35 @@ pub fn current() -> String {
 /// Closest Rufus language for a system locale such as `fr_FR.UTF-8`,
 /// `pt-PT` or `zh-Hant-HK`: exact match, else same primary language.
 fn closest(sys: &str, codes: &[&str]) -> String {
-    let sys = sys.trim().split(['.', '@']).next().unwrap_or("").replace('_', "-");
+    let sys = sys
+        .trim()
+        .split(['.', '@'])
+        .next()
+        .unwrap_or("")
+        .replace('_', "-");
     let lower = sys.to_ascii_lowercase();
     if let Some(c) = codes.iter().find(|c| c.eq_ignore_ascii_case(&sys)) {
         return c.to_string();
     }
     let primary = lower.split('-').next().unwrap_or("");
     let want = match primary {
-        "zh" if ["hant", "tw", "hk", "mo"].iter().any(|t| lower.split('-').any(|p| p == *t)) => "zh-TW",
+        "zh" if ["hant", "tw", "hk", "mo"]
+            .iter()
+            .any(|t| lower.split('-').any(|p| p == *t)) =>
+        {
+            "zh-TW"
+        }
         "no" | "nn" => "nb",
         p => p,
     };
     codes
         .iter()
-        .find(|c| c.eq_ignore_ascii_case(want) || c.split('-').next().is_some_and(|p| p.eq_ignore_ascii_case(want)))
+        .find(|c| {
+            c.eq_ignore_ascii_case(want)
+                || c.split('-')
+                    .next()
+                    .is_some_and(|p| p.eq_ignore_ascii_case(want))
+        })
         .map_or_else(|| "en-US".into(), |c| c.to_string())
 }
 
@@ -171,7 +208,10 @@ fn printf(fmt: &str, args: &[&str]) -> String {
             continue;
         }
         let mut spec = String::new();
-        while let Some(&d) = it.peek().filter(|d| d.is_ascii_digit() || matches!(**d, '.' | '$' | 'l' | 'h' | '-')) {
+        while let Some(&d) = it
+            .peek()
+            .filter(|d| d.is_ascii_digit() || matches!(**d, '.' | '$' | 'l' | 'h' | '-'))
+        {
             spec.push(d);
             it.next();
         }
@@ -200,7 +240,11 @@ fn printf(fmt: &str, args: &[&str]) -> String {
             _ => arg.into(),
         };
         let pad = width.saturating_sub(s.chars().count());
-        let (sign, digits) = if zero && s.starts_with('-') { ("-", &s[1..]) } else { ("", &s[..]) };
+        let (sign, digits) = if zero && s.starts_with('-') {
+            ("-", &s[1..])
+        } else {
+            ("", &s[..])
+        };
         out.push_str(sign);
         out.extend(std::iter::repeat_n(if zero { '0' } else { ' ' }, pad));
         out.push_str(digits);
@@ -218,7 +262,11 @@ mod tests {
         let langs = languages();
         assert_eq!(langs[0].code, "en-US");
         assert!(langs.len() >= 30);
-        assert!(langs.iter().any(|l| l.code == "fr-FR" && l.name == "French (Français)"));
+        assert!(
+            langs
+                .iter()
+                .any(|l| l.code == "fr-FR" && l.name == "French (Français)")
+        );
         set_language("en-US");
         assert_eq!(t("IDS_DEVICE_TXT"), "Device");
         assert_eq!(
@@ -235,7 +283,9 @@ mod tests {
 
     #[test]
     fn loc_fallback_to_en_us() {
-        let p = parse("l \"en-US\" \"English\" 0x0409\nt A \"en a\"\nt B \"en b\"\nl \"fr-FR\" \"French\" 0x040c\nb \"en-US\"\nt A \"fr a\"\n");
+        let p = parse(
+            "l \"en-US\" \"English\" 0x0409\nt A \"en a\"\nt B \"en b\"\nl \"fr-FR\" \"French\" 0x040c\nb \"en-US\"\nt A \"fr a\"\n",
+        );
         assert_eq!(p.strings[1].get("A").unwrap(), "fr a");
         assert!(!p.strings[1].contains_key("B"));
     }
@@ -252,7 +302,9 @@ mod tests {
 
     #[test]
     fn loc_system_mapping() {
-        let codes = ["en-US", "fr-FR", "pt-BR", "pt-PT", "zh-CN", "zh-TW", "nb-NO", "es-ES"];
+        let codes = [
+            "en-US", "fr-FR", "pt-BR", "pt-PT", "zh-CN", "zh-TW", "nb-NO", "es-ES",
+        ];
         assert_eq!(closest("fr_FR.UTF-8", &codes), "fr-FR");
         assert_eq!(closest("fr_CA.UTF-8", &codes), "fr-FR");
         assert_eq!(closest("pt-PT", &codes), "pt-PT");

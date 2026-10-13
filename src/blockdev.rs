@@ -18,7 +18,8 @@ pub fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<()> {
     {
         let mut done = 0;
         while done < buf.len() {
-            match std::os::windows::fs::FileExt::seek_read(f, &mut buf[done..], off + done as u64)? {
+            match std::os::windows::fs::FileExt::seek_read(f, &mut buf[done..], off + done as u64)?
+            {
                 0 => return Err(io::ErrorKind::UnexpectedEof.into()),
                 n => done += n,
             }
@@ -61,7 +62,13 @@ impl<'a> BlockDev<'a> {
     /// `base` and `len` must be sector-aligned.
     pub fn new(file: &'a File, base: u64, len: u64) -> Self {
         debug_assert!(base.is_multiple_of(SECTOR as u64) && len.is_multiple_of(SECTOR as u64));
-        BlockDev { file, base, len, pos: 0, cache: HashMap::new() }
+        BlockDev {
+            file,
+            base,
+            len,
+            pos: 0,
+            cache: HashMap::new(),
+        }
     }
 
     fn block_len(&self, idx: u64) -> usize {
@@ -74,7 +81,11 @@ impl<'a> BlockDev<'a> {
         }
         let (start, end) = (sectors.start * SECTOR, sectors.end * SECTOR);
         let mut disk = vec![0u8; end - start];
-        read_at(self.file, &mut disk, self.base + idx * BLOCK as u64 + start as u64)?;
+        read_at(
+            self.file,
+            &mut disk,
+            self.base + idx * BLOCK as u64 + start as u64,
+        )?;
         for s in sectors {
             if !b.valid[s] {
                 let r = s * SECTOR - start..(s + 1) * SECTOR - start;
@@ -92,14 +103,23 @@ impl<'a> BlockDev<'a> {
                 self.cache.clear();
             }
             let n = self.block_len(idx);
-            let b = Block { data: vec![0; n], valid: vec![false; n / SECTOR], dirty: false };
+            let b = Block {
+                data: vec![0; n],
+                valid: vec![false; n / SECTOR],
+                dirty: false,
+            };
             self.cache.insert(idx, b);
         }
         Ok(self.cache.get_mut(&idx).unwrap())
     }
 
     fn write_back(&mut self) -> io::Result<()> {
-        let mut dirty: Vec<u64> = self.cache.iter().filter(|(_, b)| b.dirty).map(|(i, _)| *i).collect();
+        let mut dirty: Vec<u64> = self
+            .cache
+            .iter()
+            .filter(|(_, b)| b.dirty)
+            .map(|(i, _)| *i)
+            .collect();
         dirty.sort();
         for idx in dirty {
             let mut b = self.cache.remove(&idx).unwrap();
@@ -112,7 +132,14 @@ impl<'a> BlockDev<'a> {
         Ok(())
     }
 
-    fn prepare(&self, idx: u64, blk: &mut Block, off: usize, n: usize, write: bool) -> io::Result<()> {
+    fn prepare(
+        &self,
+        idx: u64,
+        blk: &mut Block,
+        off: usize,
+        n: usize,
+        write: bool,
+    ) -> io::Result<()> {
         let sectors = off / SECTOR..(off + n).div_ceil(SECTOR);
         if !write {
             return self.fill(idx, blk, sectors);
@@ -131,7 +158,12 @@ impl<'a> BlockDev<'a> {
 
     /// Walks `len` bytes from the current position block by block, calling
     /// `f(block, offset_in_block, bytes_done, n)` on each prepared piece.
-    fn io(&mut self, len: usize, write: bool, mut f: impl FnMut(&mut Block, usize, usize, usize)) -> io::Result<usize> {
+    fn io(
+        &mut self,
+        len: usize,
+        write: bool,
+        mut f: impl FnMut(&mut Block, usize, usize, usize),
+    ) -> io::Result<usize> {
         let len = len.min((self.len - self.pos.min(self.len)) as usize);
         let mut done = 0;
         while done < len {
@@ -164,7 +196,10 @@ impl Read for BlockDev<'_> {
 impl Write for BlockDev<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         if self.pos + buf.len() as u64 > self.len {
-            return Err(io::Error::new(io::ErrorKind::WriteZero, "write past end of partition"));
+            return Err(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "write past end of partition",
+            ));
         }
         self.io(buf.len(), true, |b, off, done, n| {
             b.data[off..off + n].copy_from_slice(&buf[done..done + n])
@@ -185,7 +220,10 @@ impl Seek for BlockDev<'_> {
             SeekFrom::Current(d) => self.pos as i128 + d as i128,
         };
         if new < 0 || new > self.len as i128 {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "seek out of range"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "seek out of range",
+            ));
         }
         self.pos = new as u64;
         Ok(self.pos)
@@ -206,7 +244,11 @@ mod tests {
     fn unaligned_io_round_trips() {
         let path = std::env::temp_dir().join(format!("rustfus-bd-{}", std::process::id()));
         std::fs::write(&path, vec![0xAAu8; 3 * BLOCK]).unwrap();
-        let f = std::fs::OpenOptions::new().read(true).write(true).open(&path).unwrap();
+        let f = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
         {
             let mut d = BlockDev::new(&f, 4096, 2 * BLOCK as u64);
             d.seek(SeekFrom::Start(BLOCK as u64 - 3)).unwrap();
@@ -231,4 +273,3 @@ mod tests {
         std::fs::remove_file(path).ok();
     }
 }
-

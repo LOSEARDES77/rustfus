@@ -34,7 +34,9 @@ pub fn editions(iso: &Iso) -> Result<Vec<(u32, String)>, String> {
         return Err("install.wim is not a WIM file".into());
     }
     // XML data resource header at 0x48: 7-byte size + flags, then offset.
-    let size = u64::from_le_bytes([hdr[0x48], hdr[0x49], hdr[0x4A], hdr[0x4B], hdr[0x4C], hdr[0x4D], hdr[0x4E], 0]);
+    let size = u64::from_le_bytes([
+        hdr[0x48], hdr[0x49], hdr[0x4A], hdr[0x4B], hdr[0x4C], hdr[0x4D], hdr[0x4E], 0,
+    ]);
     let offset = u64::from_le_bytes(hdr[0x50..0x58].try_into().unwrap());
     if size == 0 || size > 64 << 20 {
         return Err("WIM XML metadata missing or too large".into());
@@ -57,7 +59,10 @@ fn read_exact_at(iso: &Iso, e: &Entry, mut off: u64, mut buf: &mut [u8]) -> Resu
 }
 
 fn parse_editions(utf16: &[u8]) -> Vec<(u32, String)> {
-    let units: Vec<u16> = utf16.chunks_exact(2).map(|c| u16::from_le_bytes([c[0], c[1]])).collect();
+    let units: Vec<u16> = utf16
+        .chunks_exact(2)
+        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .collect();
     let xml = String::from_utf16_lossy(&units);
     let tag = |s: &str, t: &str| -> Option<String> {
         let start = s.find(&format!("<{t}>"))? + t.len() + 2;
@@ -84,6 +89,12 @@ mod tests {
         let xml = "\u{feff}<WIM><TOTALBYTES>1</TOTALBYTES><IMAGE INDEX=\"1\"><NAME>Windows 11 Home</NAME></IMAGE>\
                    <IMAGE INDEX=\"6\"><NAME>Windows 11 Pro</NAME><DISPLAYNAME>Windows 11 Pro (display)</DISPLAYNAME></IMAGE></WIM>";
         let bytes: Vec<u8> = xml.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-        assert_eq!(parse_editions(&bytes), vec![(1, "Windows 11 Home".into()), (6, "Windows 11 Pro (display)".into())]);
+        assert_eq!(
+            parse_editions(&bytes),
+            vec![
+                (1, "Windows 11 Home".into()),
+                (6, "Windows 11 Pro (display)".into())
+            ]
+        );
     }
 }

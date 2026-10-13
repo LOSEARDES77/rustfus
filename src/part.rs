@@ -7,19 +7,42 @@ use std::io::{self, Seek, SeekFrom, Write};
 
 pub const SECTOR: u64 = 512;
 
-pub const GPT_BASIC_DATA: [u8; 16] = guid(0xEBD0A0A2, 0xB9E5, 0x4433, [0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7]);
-pub const GPT_ESP: [u8; 16] = guid(0xC12A7328, 0xF81F, 0x11D2, [0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B]);
-pub const GPT_LINUX: [u8; 16] = guid(0x0FC63DAF, 0x8483, 0x4772, [0x8E, 0x79, 0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4]);
+pub const GPT_BASIC_DATA: [u8; 16] = guid(
+    0xEBD0A0A2,
+    0xB9E5,
+    0x4433,
+    [0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7],
+);
+pub const GPT_ESP: [u8; 16] = guid(
+    0xC12A7328,
+    0xF81F,
+    0x11D2,
+    [0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B],
+);
+pub const GPT_LINUX: [u8; 16] = guid(
+    0x0FC63DAF,
+    0x8483,
+    0x4772,
+    [0x8E, 0x79, 0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4],
+);
 
 /// GUIDs are stored mixed-endian: first three fields little endian.
 const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> [u8; 16] {
     let (a, b, c) = (a.to_le_bytes(), b.to_le_bytes(), c.to_le_bytes());
-    [a[0], a[1], a[2], a[3], b[0], b[1], c[0], c[1], d[0], d[1], d[2], d[3], d[4], d[5], d[6], d[7]]
+    [
+        a[0], a[1], a[2], a[3], b[0], b[1], c[0], c[1], d[0], d[1], d[2], d[3], d[4], d[5], d[6],
+        d[7],
+    ]
 }
 
 pub fn random_u64() -> u64 {
     let mut h = std::collections::hash_map::RandomState::new().build_hasher();
-    h.write_u128(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    h.write_u128(
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos(),
+    );
     h.finish()
 }
 
@@ -150,25 +173,58 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.set_len(size).unwrap();
         let parts = [
-            Part { start: 1 << 20, size: 32 << 20, mbr_type: 0x0C, gpt_type: GPT_BASIC_DATA, name: "Main", active: true },
-            Part { start: 33 << 20, size: 1 << 20, mbr_type: 0xEF, gpt_type: GPT_ESP, name: "UEFI:NTFS", active: false },
+            Part {
+                start: 1 << 20,
+                size: 32 << 20,
+                mbr_type: 0x0C,
+                gpt_type: GPT_BASIC_DATA,
+                name: "Main",
+                active: true,
+            },
+            Part {
+                start: 33 << 20,
+                size: 1 << 20,
+                mbr_type: 0xEF,
+                gpt_type: GPT_ESP,
+                name: "UEFI:NTFS",
+                active: false,
+            },
         ];
-        if gpt { write_gpt(&mut f, size, &parts) } else { write_mbr(&mut f, size, &parts) }.unwrap();
+        if gpt {
+            write_gpt(&mut f, size, &parts)
+        } else {
+            write_mbr(&mut f, size, &parts)
+        }
+        .unwrap();
         let out = Command::new("sfdisk").arg("-d").arg(&path).output().ok()?;
         std::fs::remove_file(&path).ok();
-        out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
     }
 
     #[test]
     fn sfdisk_reads_tables() {
         let Some(mbr) = layout(false) else { return };
         assert!(mbr.contains("label: dos"), "{mbr}");
-        assert!(mbr.contains("start=        2048, size=       65536, type=c, bootable"), "{mbr}");
-        assert!(mbr.contains("start=       67584, size=        2048, type=ef"), "{mbr}");
+        assert!(
+            mbr.contains("start=        2048, size=       65536, type=c, bootable"),
+            "{mbr}"
+        );
+        assert!(
+            mbr.contains("start=       67584, size=        2048, type=ef"),
+            "{mbr}"
+        );
         let gpt = layout(true).unwrap();
         assert!(gpt.contains("label: gpt"), "{gpt}");
-        assert!(gpt.contains("type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"), "{gpt}");
-        assert!(gpt.contains("type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid="), "{gpt}");
+        assert!(
+            gpt.contains("type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"),
+            "{gpt}"
+        );
+        assert!(
+            gpt.contains("type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid="),
+            "{gpt}"
+        );
         assert!(gpt.contains("name=\"UEFI:NTFS\""), "{gpt}");
     }
 }

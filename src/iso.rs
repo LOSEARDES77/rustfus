@@ -14,7 +14,8 @@ fn bad(msg: &str) -> io::Error {
 }
 
 fn le32(b: &[u8], o: usize) -> u32 {
-    b.get(o..o + 4).map_or(0, |s| u32::from_le_bytes(s.try_into().unwrap()))
+    b.get(o..o + 4)
+        .map_or(0, |s| u32::from_le_bytes(s.try_into().unwrap()))
 }
 
 fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<usize> {
@@ -84,9 +85,17 @@ struct Rec<'a> {
 
 fn parse_rec(r: &[u8]) -> io::Result<Rec<'_>> {
     let n = *r.get(32).ok_or_else(|| bad("bad directory record"))? as usize;
-    let id = r.get(33..33 + n).ok_or_else(|| bad("bad directory record"))?;
+    let id = r
+        .get(33..33 + n)
+        .ok_or_else(|| bad("bad directory record"))?;
     let su = r.get(33 + n + (1 - n % 2)..).unwrap_or(&[]);
-    Ok(Rec { ext: le32(r, 2) as u64 * BLK, len: le32(r, 10) as u64, flags: r[25], id, su })
+    Ok(Rec {
+        ext: le32(r, 2) as u64 * BLK,
+        len: le32(r, 10) as u64,
+        flags: r[25],
+        id,
+        su,
+    })
 }
 
 #[derive(Default)]
@@ -101,7 +110,8 @@ struct Susp {
 fn boot_catalog(f: &File, lba: u32) -> ElTorito {
     let mut b = [0u8; 2048];
     let mut et = ElTorito::default();
-    if read_exact_at(f, &mut b, lba as u64 * BLK).is_err() || b[0] != 1 || b[30..32] != [0x55, 0xAA] {
+    if read_exact_at(f, &mut b, lba as u64 * BLK).is_err() || b[0] != 1 || b[30..32] != [0x55, 0xAA]
+    {
         return et;
     }
     let mut plat = b[1];
@@ -133,15 +143,31 @@ impl Iso {
                 return Err(bad("not an ISO9660 image"));
             }
             match vd[0] {
-                0 if &vd[7..30] == b"EL TORITO SPECIFICATION" => boot = boot_catalog(&f, le32(&vd, 71)),
-                1 if pvd.is_none() => pvd = Some((root_of(&vd)?, String::from_utf8_lossy(&vd[40..72]).trim().to_string())),
-                2 if vd[88..90] == [0x25, 0x2f] && matches!(vd[90], 0x40 | 0x43 | 0x45) => joliet = Some(root_of(&vd)?),
+                0 if &vd[7..30] == b"EL TORITO SPECIFICATION" => {
+                    boot = boot_catalog(&f, le32(&vd, 71))
+                }
+                1 if pvd.is_none() => {
+                    pvd = Some((
+                        root_of(&vd)?,
+                        String::from_utf8_lossy(&vd[40..72]).trim().to_string(),
+                    ))
+                }
+                2 if vd[88..90] == [0x25, 0x2f] && matches!(vd[90], 0x40 | 0x43 | 0x45) => {
+                    joliet = Some(root_of(&vd)?)
+                }
                 255 => break,
                 _ => {}
             }
         }
         let (root, vol) = pvd.ok_or_else(|| bad("no primary volume descriptor"))?;
-        let mut iso = Iso { f, vol, root, names: Names::Plain, boot, udf: None };
+        let mut iso = Iso {
+            f,
+            vol,
+            root,
+            names: Names::Plain,
+            boot,
+            udf: None,
+        };
         let mut sec = [0u8; 2048];
         read_exact_at(&iso.f, &mut sec, root.0)?;
         let dot = parse_rec(sec.get(..sec[0] as usize).unwrap_or(&[]))?;
@@ -164,7 +190,14 @@ impl Iso {
     pub fn entries(&self) -> io::Result<Vec<Entry>> {
         let mut out = Vec::new();
         match &self.udf {
-            Some(u) => self.udf_walk(u, u.icb(&self.f, u.root)?, "", &mut out, &mut HashSet::new(), 0)?,
+            Some(u) => self.udf_walk(
+                u,
+                u.icb(&self.f, u.root)?,
+                "",
+                &mut out,
+                &mut HashSet::new(),
+                0,
+            )?,
             None => self.walk(self.root, "", &mut out, &mut HashSet::new(), 0)?,
         }
         Ok(out)
@@ -172,17 +205,33 @@ impl Iso {
 
     pub fn reader<'a>(&'a self, e: &Entry) -> io::Result<impl Read + 'a> {
         if e.is_dir {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "is a directory"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "is a directory",
+            ));
         }
-        Ok(ExtReader { f: &self.f, ext: e.extents.clone(), i: 0, pos: 0 })
+        Ok(ExtReader {
+            f: &self.f,
+            ext: e.extents.clone(),
+            i: 0,
+            pos: 0,
+        })
     }
 
     /// Reads up to `buf.len()` bytes at `offset` within file `e` (fills `buf` unless EOF; 0 at EOF).
     pub fn read_at(&self, e: &Entry, mut offset: u64, buf: &mut [u8]) -> io::Result<usize> {
         if e.is_dir {
-            return Err(io::Error::new(io::ErrorKind::InvalidInput, "is a directory"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "is a directory",
+            ));
         }
-        let mut r = ExtReader { f: &self.f, ext: e.extents.clone(), i: 0, pos: 0 };
+        let mut r = ExtReader {
+            f: &self.f,
+            ext: e.extents.clone(),
+            i: 0,
+            pos: 0,
+        };
         while r.ext.get(r.i).is_some_and(|x| offset >= x.1) {
             offset -= r.ext[r.i].1;
             r.i += 1;
@@ -212,12 +261,16 @@ impl Iso {
                 let e = &area[p..p + l];
                 match &e[..2] {
                     b"SP" => s.sp = l >= 7 && e[4..6] == [0xbe, 0xef],
-                    b"NM" if l >= 5 && e[4] & 6 == 0 => name.get_or_insert_default().extend(&e[5..]),
+                    b"NM" if l >= 5 && e[4] & 6 == 0 => {
+                        name.get_or_insert_default().extend(&e[5..])
+                    }
                     b"SL" if l >= 5 => {
                         let link = link.get_or_insert_default();
                         let mut c = 5;
                         while let (Some(&cf), Some(&cl)) = (e.get(c), e.get(c + 1)) {
-                            let Some(body) = e.get(c + 2..c + 2 + cl as usize) else { break };
+                            let Some(body) = e.get(c + 2..c + 2 + cl as usize) else {
+                                break;
+                            };
                             if !link.is_empty() && !cont && !link.ends_with('/') {
                                 link.push('/');
                             }
@@ -231,7 +284,12 @@ impl Iso {
                             c += 2 + cl as usize;
                         }
                     }
-                    b"CE" if l >= 28 => ce = Some((le32(e, 4) as u64 * BLK + le32(e, 12) as u64, le32(e, 20) as usize)),
+                    b"CE" if l >= 28 => {
+                        ce = Some((
+                            le32(e, 4) as u64 * BLK + le32(e, 12) as u64,
+                            le32(e, 20) as usize,
+                        ))
+                    }
                     b"RE" => s.relocated = true,
                     b"CL" if l >= 12 => s.child = Some(le32(e, 4) as u64 * BLK),
                     b"ST" => break,
@@ -251,7 +309,14 @@ impl Iso {
         Ok(s)
     }
 
-    fn walk(&self, (ext, len): (u64, u64), prefix: &str, out: &mut Vec<Entry>, seen: &mut HashSet<u64>, depth: u32) -> io::Result<()> {
+    fn walk(
+        &self,
+        (ext, len): (u64, u64),
+        prefix: &str,
+        out: &mut Vec<Entry>,
+        seen: &mut HashSet<u64>,
+        depth: u32,
+    ) -> io::Result<()> {
         if depth > 64 {
             return Err(bad("directory tree too deep"));
         }
@@ -271,7 +336,10 @@ impl Iso {
                 pos = (pos / 2048 + 1) * 2048;
                 continue;
             }
-            let r = parse_rec(buf.get(pos..pos + n).ok_or_else(|| bad("bad directory record"))?)?;
+            let r = parse_rec(
+                buf.get(pos..pos + n)
+                    .ok_or_else(|| bad("bad directory record"))?,
+            )?;
             pos += n;
             if r.id == [0] || r.id == [1] || r.flags & 4 != 0 {
                 continue;
@@ -285,27 +353,44 @@ impl Iso {
                 continue;
             }
             (last_id, more) = (r.id, r.flags & 0x80 != 0);
-            let s = if self.names == Names::Rr { self.susp(r.su)? } else { Susp::default() };
+            let s = if self.names == Names::Rr {
+                self.susp(r.su)?
+            } else {
+                Susp::default()
+            };
             if s.relocated {
                 continue;
             }
             let name = match (s.name, self.names) {
                 (Some(n), _) => n,
                 (None, Names::Joliet) => {
-                    let u: Vec<u16> = r.id.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+                    let u: Vec<u16> =
+                        r.id.chunks_exact(2)
+                            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                            .collect();
                     let n = String::from_utf16_lossy(&u);
                     n.split(';').next().unwrap_or("").to_string()
                 }
                 _ => {
                     let n = String::from_utf8_lossy(r.id);
-                    n.split(';').next().unwrap_or("").trim_end_matches('.').to_string()
+                    n.split(';')
+                        .next()
+                        .unwrap_or("")
+                        .trim_end_matches('.')
+                        .to_string()
                 }
             };
             if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
                 continue;
             }
             let path = format!("{prefix}{name}");
-            let mut e = Entry { path, is_dir: r.flags & 2 != 0, size: r.len, extents: vec![(r.ext, r.len)], link: s.link };
+            let mut e = Entry {
+                path,
+                is_dir: r.flags & 2 != 0,
+                size: r.len,
+                extents: vec![(r.ext, r.len)],
+                link: s.link,
+            };
             if let Some(c) = s.child {
                 let mut sec = [0u8; 2048];
                 read_exact_at(&self.f, &mut sec, c)?;
@@ -367,16 +452,23 @@ impl Read for ExtReader<'_> {
 const ZERO: u64 = u64::MAX;
 
 fn le16(b: &[u8], o: usize) -> u16 {
-    b.get(o..o + 2).map_or(0, |s| u16::from_le_bytes([s[0], s[1]]))
+    b.get(o..o + 2)
+        .map_or(0, |s| u16::from_le_bytes([s[0], s[1]]))
 }
 
 fn le64(b: &[u8], o: usize) -> u64 {
-    b.get(o..o + 8).map_or(0, |s| u64::from_le_bytes(s.try_into().unwrap()))
+    b.get(o..o + 8)
+        .map_or(0, |s| u64::from_le_bytes(s.try_into().unwrap()))
 }
 
 /// Checks a descriptor tag's identifier and header checksum.
 fn tag(b: &[u8], id: u16) -> io::Result<()> {
-    let ok = b.len() >= 16 && le16(b, 0) == id && (0..16).filter(|&i| i != 4).fold(0u8, |s, i| s.wrapping_add(b[i])) == b[4];
+    let ok = b.len() >= 16
+        && le16(b, 0) == id
+        && (0..16)
+            .filter(|&i| i != 4)
+            .fold(0u8, |s, i| s.wrapping_add(b[i]))
+            == b[4];
     if !ok {
         return Err(bad("bad UDF descriptor tag"));
     }
@@ -387,14 +479,22 @@ fn tag(b: &[u8], id: u16) -> io::Result<()> {
 fn cs0(b: &[u8]) -> String {
     match b.split_first() {
         Some((8 | 254, r)) => r.iter().map(|&c| c as char).collect(),
-        Some((16 | 255, r)) => String::from_utf16_lossy(&r.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect::<Vec<_>>()),
+        Some((16 | 255, r)) => String::from_utf16_lossy(
+            &r.chunks_exact(2)
+                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                .collect::<Vec<_>>(),
+        ),
         _ => String::new(),
     }
 }
 
 fn dstring(b: &[u8]) -> String {
     let n = b.last().map_or(0, |&n| n as usize);
-    if n < b.len() { cs0(&b[..n]) } else { String::new() }
+    if n < b.len() {
+        cs0(&b[..n])
+    } else {
+        String::new()
+    }
 }
 
 enum Part {
@@ -464,19 +564,39 @@ impl Udf {
             _ => return Err(bad("bad UDF file entry")),
         };
         tag(&b, id)?;
-        let (l_ea, l_ad, size) = (le32(&b, hdr - 8) as usize, le32(&b, hdr - 4) as usize, le64(&b, 56));
-        let start = hdr.checked_add(l_ea).ok_or_else(|| bad("bad UDF file entry"))?;
-        let ads = b.get(start..start.saturating_add(l_ad)).ok_or_else(|| bad("bad UDF file entry"))?;
+        let (l_ea, l_ad, size) = (
+            le32(&b, hdr - 8) as usize,
+            le32(&b, hdr - 4) as usize,
+            le64(&b, 56),
+        );
+        let start = hdr
+            .checked_add(l_ea)
+            .ok_or_else(|| bad("bad UDF file entry"))?;
+        let ads = b
+            .get(start..start.saturating_add(l_ad))
+            .ok_or_else(|| bad("bad UDF file entry"))?;
         let ext = match le16(&b, 34) & 7 {
             3 if size <= l_ad as u64 => vec![(at + start as u64, size)],
             3 => return Err(bad("bad UDF embedded data")),
             t => self.ads(f, ads, t, part, size)?,
         };
-        Ok(Node { at, kind: b[27], size, ext })
+        Ok(Node {
+            at,
+            kind: b[27],
+            size,
+            ext,
+        })
     }
 
     /// Short (0), long (1) or extended (2) allocation descriptors, following continuation extents.
-    fn ads(&self, f: &File, ads: &[u8], t: u16, part: u16, size: u64) -> io::Result<Vec<(u64, u64)>> {
+    fn ads(
+        &self,
+        f: &File,
+        ads: &[u8],
+        t: u16,
+        part: u16,
+        size: u64,
+    ) -> io::Result<Vec<(u64, u64)>> {
         let sz = match t {
             0 => 8,
             1 => 16,
@@ -504,7 +624,10 @@ impl Udf {
                     let (_, b) = self.block(f, p, lbn)?;
                     tag(&b, 258)?;
                     let l = le32(&b, 20) as usize;
-                    buf = b.get(24..24usize.saturating_add(l)).ok_or_else(|| bad("bad UDF allocation extent"))?.to_vec();
+                    buf = b
+                        .get(24..24usize.saturating_add(l))
+                        .ok_or_else(|| bad("bad UDF allocation extent"))?
+                        .to_vec();
                     continue 'next;
                 }
                 let n = len.min(left);
@@ -555,7 +678,9 @@ impl Iso {
             }
             if &b[1..6] == b"CD001" {
                 match b[0] {
-                    0 if &b[7..30] == b"EL TORITO SPECIFICATION" => boot = boot_catalog(&f, le32(&b, 71)),
+                    0 if &b[7..30] == b"EL TORITO SPECIFICATION" => {
+                        boot = boot_catalog(&f, le32(&b, 71))
+                    }
                     255 => break,
                     _ => {}
                 }
@@ -587,8 +712,17 @@ impl Iso {
         if !lv.is_empty() {
             vol = lv;
         }
-        let maps = lvd.get(440..440 + le32(&lvd, 264) as usize).ok_or_else(|| bad("bad UDF partition maps"))?;
-        let (mut udf, mut meta, mut p) = (Udf { parts: vec![], root: (0, 0) }, vec![], 0);
+        let maps = lvd
+            .get(440..440 + le32(&lvd, 264) as usize)
+            .ok_or_else(|| bad("bad UDF partition maps"))?;
+        let (mut udf, mut meta, mut p) = (
+            Udf {
+                parts: vec![],
+                root: (0, 0),
+            },
+            vec![],
+            0,
+        );
         for _ in 0..le32(&lvd, 268).min(64) {
             let m = maps.get(p..).unwrap_or(&[]);
             let (num, len) = match (m.first(), m.get(1)) {
@@ -604,7 +738,11 @@ impl Iso {
                 }
                 _ => return Err(bad("bad UDF partition map")),
             };
-            let start = pds.iter().find(|d| d.0 == num).ok_or_else(|| bad("missing UDF partition descriptor"))?.1;
+            let start = pds
+                .iter()
+                .find(|d| d.0 == num)
+                .ok_or_else(|| bad("missing UDF partition descriptor"))?
+                .1;
             udf.parts.push(Part::Phys(start));
             p += len as usize;
         }
@@ -616,7 +754,14 @@ impl Iso {
         let (_, b) = udf.block(&f, le16(fsd, 8), le32(fsd, 4))?;
         tag(&b, 256)?;
         udf.root = (le16(&b, 408), le32(&b, 404));
-        Ok(Iso { f, vol, root: (0, 0), names: Names::Plain, boot, udf: Some(udf) })
+        Ok(Iso {
+            f,
+            vol,
+            root: (0, 0),
+            names: Names::Plain,
+            boot,
+            udf: Some(udf),
+        })
     }
 
     fn read_node(&self, n: &Node, cap: u64) -> io::Result<Vec<u8>> {
@@ -624,11 +769,25 @@ impl Iso {
             return Err(bad("UDF directory too large"));
         }
         let mut v = vec![0; n.size as usize];
-        ExtReader { f: &self.f, ext: n.ext.clone(), i: 0, pos: 0 }.read_exact(&mut v)?;
+        ExtReader {
+            f: &self.f,
+            ext: n.ext.clone(),
+            i: 0,
+            pos: 0,
+        }
+        .read_exact(&mut v)?;
         Ok(v)
     }
 
-    fn udf_walk(&self, u: &Udf, dir: Node, prefix: &str, out: &mut Vec<Entry>, seen: &mut HashSet<u64>, depth: u32) -> io::Result<()> {
+    fn udf_walk(
+        &self,
+        u: &Udf,
+        dir: Node,
+        prefix: &str,
+        out: &mut Vec<Entry>,
+        seen: &mut HashSet<u64>,
+        depth: u32,
+    ) -> io::Result<()> {
         if depth > 64 {
             return Err(bad("directory tree too deep"));
         }
@@ -641,14 +800,27 @@ impl Iso {
             let d = &buf[pos..];
             tag(d, 257)?;
             let (ch, l_fi, l_iu) = (d[18], d[19] as usize, le16(d, 36) as usize);
-            let name = cs0(d.get(38 + l_iu..38 + l_iu + l_fi).ok_or_else(|| bad("bad UDF file identifier"))?);
+            let name = cs0(d
+                .get(38 + l_iu..38 + l_iu + l_fi)
+                .ok_or_else(|| bad("bad UDF file identifier"))?);
             pos += (38 + l_iu + l_fi + 3) & !3;
-            if ch & 0x0c != 0 || name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\', '\0']) {
+            if ch & 0x0c != 0
+                || name.is_empty()
+                || name == "."
+                || name == ".."
+                || name.contains(['/', '\\', '\0'])
+            {
                 continue; // deleted, parent, or unusable name
             }
             let n = u.icb(&self.f, (le16(d, 28), le32(d, 24)))?;
             let path = format!("{prefix}{name}");
-            let mut e = Entry { path, is_dir: ch & 2 != 0, size: n.size, extents: vec![], link: None };
+            let mut e = Entry {
+                path,
+                is_dir: ch & 2 != 0,
+                size: n.size,
+                extents: vec![],
+                link: None,
+            };
             if e.is_dir {
                 e.size = 0;
                 subdirs.push((out.len(), n));
@@ -684,7 +856,14 @@ mod tests {
     /// Builds `dir/out.iso` from `dir/src`; None if xorriso is missing.
     fn mkiso(dir: &Path, args: &[&str]) -> Option<Iso> {
         let iso = dir.join("out.iso");
-        let st = Command::new("xorriso").args(["-as", "mkisofs", "-quiet", "-o"]).arg(&iso).args(args).arg(dir.join("src")).stderr(std::process::Stdio::null()).status().ok()?;
+        let st = Command::new("xorriso")
+            .args(["-as", "mkisofs", "-quiet", "-o"])
+            .arg(&iso)
+            .args(args)
+            .arg(dir.join("src"))
+            .stderr(std::process::Stdio::null())
+            .status()
+            .ok()?;
         assert!(st.success());
         Some(Iso::open(&iso).unwrap())
     }
@@ -693,7 +872,11 @@ mod tests {
         let es = iso.entries().unwrap();
         for (i, e) in es.iter().enumerate() {
             if let Some((parent, _)) = e.path.rsplit_once('/') {
-                assert!(es[..i].iter().any(|p| p.is_dir && p.path == parent), "{} before parent", e.path);
+                assert!(
+                    es[..i].iter().any(|p| p.is_dir && p.path == parent),
+                    "{} before parent",
+                    e.path
+                );
             }
             let p = src.join(&e.path);
             if e.is_dir {
@@ -709,7 +892,8 @@ mod tests {
     }
 
     fn populate(src: &Path) -> String {
-        let long = "A Very Long Mixed-Case File Name That Exceeds Joliet Limits Maybe.txt".to_string();
+        let long =
+            "A Very Long Mixed-Case File Name That Exceeds Joliet Limits Maybe.txt".to_string();
         fs::create_dir_all(src.join("EFI/Boot/deep/er")).unwrap();
         fs::write(src.join(&long), b"long").unwrap();
         fs::write(src.join("EFI/Boot/bootx64.efi"), vec![7u8; 5000]).unwrap();
@@ -723,13 +907,21 @@ mod tests {
         let long = populate(&d.join("src"));
         #[cfg(unix)]
         std::os::unix::fs::symlink("EFI/Boot/bootx64.efi", d.join("src/link")).unwrap();
-        let Some(iso) = mkiso(&d, &["-R", "-V", "RR_TEST"]) else { return };
+        let Some(iso) = mkiso(&d, &["-R", "-V", "RR_TEST"]) else {
+            return;
+        };
         assert_eq!(iso.volume_id(), "RR_TEST");
         let es = check(&iso, &d.join("src"));
         let paths: Vec<&str> = es.iter().map(|e| e.path.as_str()).collect();
-        assert!(paths.contains(&long.as_str()) && paths.contains(&"EFI/Boot/deep/er/x.cfg"), "{paths:?}");
+        assert!(
+            paths.contains(&long.as_str()) && paths.contains(&"EFI/Boot/deep/er/x.cfg"),
+            "{paths:?}"
+        );
         #[cfg(unix)]
-        assert_eq!(es.iter().find(|e| e.path == "link").unwrap().symlink(), Some("EFI/Boot/bootx64.efi"));
+        assert_eq!(
+            es.iter().find(|e| e.path == "link").unwrap().symlink(),
+            Some("EFI/Boot/bootx64.efi")
+        );
         let _ = fs::remove_dir_all(&d);
     }
 
@@ -737,7 +929,9 @@ mod tests {
     fn iso_joliet() {
         let d = tmp("joliet");
         populate(&d.join("src"));
-        let Some(iso) = mkiso(&d, &["--norock", "-J", "-joliet-long"]) else { return };
+        let Some(iso) = mkiso(&d, &["--norock", "-J", "-joliet-long"]) else {
+            return;
+        };
         assert_eq!(iso.names as u8, Names::Joliet as u8);
         let es = check(&iso, &d.join("src"));
         assert!(es.iter().any(|e| e.path == "EFI/Boot/bootx64.efi"));
@@ -749,7 +943,16 @@ mod tests {
         let d = tmp("boot");
         fs::write(d.join("src/boot.img"), vec![1u8; 2048]).unwrap();
         fs::write(d.join("src/efi.img"), vec![2u8; 4096]).unwrap();
-        let efi = ["-R", "-b", "boot.img", "-no-emul-boot", "-eltorito-alt-boot", "-e", "efi.img", "-no-emul-boot"];
+        let efi = [
+            "-R",
+            "-b",
+            "boot.img",
+            "-no-emul-boot",
+            "-eltorito-alt-boot",
+            "-e",
+            "efi.img",
+            "-no-emul-boot",
+        ];
         let Some(iso) = mkiso(&d, &efi) else { return };
         let et = iso.el_torito();
         assert!(et.bios && et.efi, "{et:?}");
@@ -786,7 +989,14 @@ mod tests {
         pvd[156..190].copy_from_slice(&rec(18, 2048, 2, &[0]));
         img[17 * 2048] = 255;
         img[17 * 2048 + 1..17 * 2048 + 6].copy_from_slice(b"CD001");
-        let dir: Vec<u8> = [rec(18, 2048, 2, &[0]), rec(18, 2048, 2, &[1]), rec(19, 2048, 0x80, b"BIG.BIN;1"), rec(20, 100, 0, b"BIG.BIN;1"), rec(20, 1, 4, b"ASSOC.;1")].concat();
+        let dir: Vec<u8> = [
+            rec(18, 2048, 2, &[0]),
+            rec(18, 2048, 2, &[1]),
+            rec(19, 2048, 0x80, b"BIG.BIN;1"),
+            rec(20, 100, 0, b"BIG.BIN;1"),
+            rec(20, 1, 4, b"ASSOC.;1"),
+        ]
+        .concat();
         img[18 * 2048..18 * 2048 + dir.len()].copy_from_slice(&dir);
         img[19 * 2048..20 * 2048].fill(0xaa);
         img[20 * 2048..20 * 2048 + 100].fill(0xbb);
@@ -800,7 +1010,11 @@ mod tests {
         assert_eq!((es[0].path.as_str(), es[0].size), ("BIG.BIN", 2148));
         let mut got = Vec::new();
         iso.reader(&es[0]).unwrap().read_to_end(&mut got).unwrap();
-        assert!(got.len() == 2148 && got[..2048].iter().all(|&b| b == 0xaa) && got[2048..].iter().all(|&b| b == 0xbb));
+        assert!(
+            got.len() == 2148
+                && got[..2048].iter().all(|&b| b == 0xaa)
+                && got[2048..].iter().all(|&b| b == 0xbb)
+        );
         let mut buf = [0u8; 8];
         assert_eq!(iso.read_at(&es[0], 2044, &mut buf).unwrap(), 8);
         assert_eq!(buf, [0xaa, 0xaa, 0xaa, 0xaa, 0xbb, 0xbb, 0xbb, 0xbb]);
@@ -811,17 +1025,28 @@ mod tests {
         fs::write(&p, &img[..19 * 2048 + 10]).unwrap();
         let iso = Iso::open(&p).unwrap();
         let mut got = Vec::new();
-        assert!(iso.reader(&iso.entries().unwrap()[0]).unwrap().read_to_end(&mut got).is_err());
+        assert!(
+            iso.reader(&iso.entries().unwrap()[0])
+                .unwrap()
+                .read_to_end(&mut got)
+                .is_err()
+        );
         img[18 * 2048 + 100] = 250;
         fs::write(&p, &img).unwrap();
-        assert_eq!(Iso::open(&p).unwrap().entries().unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            Iso::open(&p).unwrap().entries().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
         fs::write(&p, &img[..17 * 2048]).unwrap();
         assert!(Iso::open(&p).is_err());
         let _ = fs::remove_dir_all(&d);
     }
 
     fn sorted(es: &[Entry]) -> Vec<(String, bool, u64)> {
-        let mut v: Vec<_> = es.iter().map(|e| (e.path.clone(), e.is_dir, e.size)).collect();
+        let mut v: Vec<_> = es
+            .iter()
+            .map(|e| (e.path.clone(), e.is_dir, e.size))
+            .collect();
         v.sort();
         v
     }
@@ -833,17 +1058,44 @@ mod tests {
         let long = populate(&src);
         let uni = "ünïcødé ✓ 名前 with a rather long name to exceed 64 chars of joliet.bin";
         fs::create_dir_all(src.join("sources/Ünï")).unwrap();
-        fs::write(src.join("sources").join(uni), (0..3_000_000u32).map(|i| (i % 251) as u8).collect::<Vec<_>>()).unwrap();
+        fs::write(
+            src.join("sources").join(uni),
+            (0..3_000_000u32)
+                .map(|i| (i % 251) as u8)
+                .collect::<Vec<_>>(),
+        )
+        .unwrap();
         fs::write(src.join("sources/Ünï/empty"), b"").unwrap();
         let out = d.join("out.iso");
-        let args = ["-quiet", "-udf", "-R", "-input-charset", "utf-8", "-V", "GEN_UDF", "-o"];
-        let Ok(st) = Command::new("genisoimage").args(args).arg(&out).arg(&src).stderr(std::process::Stdio::null()).status() else { return };
+        let args = [
+            "-quiet",
+            "-udf",
+            "-R",
+            "-input-charset",
+            "utf-8",
+            "-V",
+            "GEN_UDF",
+            "-o",
+        ];
+        let Ok(st) = Command::new("genisoimage")
+            .args(args)
+            .arg(&out)
+            .arg(&src)
+            .stderr(std::process::Stdio::null())
+            .status()
+        else {
+            return;
+        };
         assert!(st.success());
         let udf = Iso::open_udf(File::open(&out).unwrap()).unwrap();
         assert!(udf.udf.is_some());
         assert_eq!(udf.volume_id(), "GEN_UDF");
         let es = check(&udf, &src);
-        assert!(es.iter().any(|e| e.path == long) && es.iter().any(|e| e.path == format!("sources/{uni}")), "{es:?}");
+        assert!(
+            es.iter().any(|e| e.path == long)
+                && es.iter().any(|e| e.path == format!("sources/{uni}")),
+            "{es:?}"
+        );
         let iso = Iso::open(&out).unwrap();
         assert!(iso.udf.is_none());
         assert_eq!(sorted(&es), sorted(&iso.entries().unwrap()));
@@ -857,18 +1109,28 @@ mod tests {
         populate(&src);
         let out = d.join("out.udf");
         fs::write(&out, vec![0u8; 4 << 20]).unwrap();
-        let ok = Command::new("mkudffs").args(["--blocksize=2048", "--label=MKUDF"]).arg(&out).stdout(std::process::Stdio::null()).status().is_ok_and(|s| s.success());
+        let ok = Command::new("mkudffs")
+            .args(["--blocksize=2048", "--label=MKUDF"])
+            .arg(&out)
+            .stdout(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
         if !ok {
             return; // mkudffs not installed
         }
         let iso = Iso::open(&out).unwrap();
-        assert_eq!((iso.volume_id().as_str(), iso.entries().unwrap().len()), ("MKUDF", 0));
+        assert_eq!(
+            (iso.volume_id().as_str(), iso.entries().unwrap().len()),
+            ("MKUDF", 0)
+        );
         let _ = fs::remove_dir_all(&d);
     }
 
     fn set_tag(b: &mut [u8], id: u16) {
         b[..2].copy_from_slice(&id.to_le_bytes());
-        b[4] = (0..16).filter(|&i| i != 4).fold(0u8, |s, i| s.wrapping_add(b[i]));
+        b[4] = (0..16)
+            .filter(|&i| i != 4)
+            .fold(0u8, |s, i| s.wrapping_add(b[i]));
     }
 
     fn put(b: &mut [u8], o: usize, v: &[u8]) {
@@ -937,10 +1199,24 @@ mod tests {
         put(&mut b, 404, &1u32.to_le_bytes());
         set_tag(&mut b, 256);
         sec(&mut img, P, &b);
-        let dir16: Vec<u8> = std::iter::once(16).chain("Dïr✓".encode_utf16().flat_map(u16::to_be_bytes)).collect();
-        let root = [fid(10, b"", 1), fid(2, &dir16, 2), fid(0, b"\x08a.txt", 3), fid(4, b"\x08gone", 3)].concat();
+        let dir16: Vec<u8> = std::iter::once(16)
+            .chain("Dïr✓".encode_utf16().flat_map(u16::to_be_bytes))
+            .collect();
+        let root = [
+            fid(10, b"", 1),
+            fid(2, &dir16, 2),
+            fid(0, b"\x08a.txt", 3),
+            fid(4, b"\x08gone", 3),
+        ]
+        .concat();
         sec(&mut img, P + 1, &fe(261, 4, 3, root.len() as u64, &root));
-        let sub = [fid(10, b"", 1), fid(0, b"\x08big.bin", 5), fid(0, b"\x08ln", 7), fid(2, b"\x08loop", 1)].concat();
+        let sub = [
+            fid(10, b"", 1),
+            fid(0, b"\x08big.bin", 5),
+            fid(0, b"\x08ln", 7),
+            fid(2, b"\x08loop", 1),
+        ]
+        .concat();
         let short = [(sub.len() as u32).to_le_bytes(), 4u32.to_le_bytes()].concat();
         sec(&mut img, P + 2, &fe(266, 4, 0, sub.len() as u64, &short));
         sec(&mut img, P + 3, &fe(261, 5, 3, 5, b"hello"));
@@ -976,8 +1252,17 @@ mod tests {
         assert_eq!(iso.volume_id(), "UDF_ONLY");
         assert!(!iso.el_torito().bios && !iso.el_torito().efi);
         let es = iso.entries().unwrap();
-        let got: Vec<_> = es.iter().map(|e| (e.path.as_str(), e.is_dir, e.size, e.symlink())).collect();
-        let want = [("Dïr✓", true, 0, None), ("a.txt", false, 5, None), ("Dïr✓/big.bin", false, 2148, None), ("Dïr✓/ln", false, 0, Some("/a.txt")), ("Dïr✓/loop", true, 0, None)];
+        let got: Vec<_> = es
+            .iter()
+            .map(|e| (e.path.as_str(), e.is_dir, e.size, e.symlink()))
+            .collect();
+        let want = [
+            ("Dïr✓", true, 0, None),
+            ("a.txt", false, 5, None),
+            ("Dïr✓/big.bin", false, 2148, None),
+            ("Dïr✓/ln", false, 0, Some("/a.txt")),
+            ("Dïr✓/loop", true, 0, None),
+        ];
         assert_eq!(got, want);
         let read = |e: &Entry| {
             let mut v = Vec::new();
@@ -986,23 +1271,42 @@ mod tests {
         };
         assert_eq!(read(&es[1]), b"hello");
         let big = read(&es[2]);
-        assert!(big.len() == 2148 && big[..2048].iter().all(|&b| b == 0xcc) && big[2048..].iter().all(|&b| b == 0));
+        assert!(
+            big.len() == 2148
+                && big[..2048].iter().all(|&b| b == 0xcc)
+                && big[2048..].iter().all(|&b| b == 0)
+        );
         let mut buf = [1u8; 4];
-        assert_eq!((iso.read_at(&es[2], 2046, &mut buf).unwrap(), buf), (4, [0xcc, 0xcc, 0, 0]));
-        assert_eq!((iso.read_at(&es[1], 3, &mut buf).unwrap(), &buf[..2]), (2, &b"lo"[..]));
+        assert_eq!(
+            (iso.read_at(&es[2], 2046, &mut buf).unwrap(), buf),
+            (4, [0xcc, 0xcc, 0, 0])
+        );
+        assert_eq!(
+            (iso.read_at(&es[1], 3, &mut buf).unwrap(), &buf[..2]),
+            (2, &b"lo"[..])
+        );
         // Malformed: broken FID name length, bad root ICB tag, bad AVDP.
         let fid0 = 300 * 2048 + 2048 + 176;
         img[fid0 + 40 + 19] = 200;
         fs::write(&p, &img).unwrap();
-        assert_eq!(Iso::open(&p).unwrap().entries().unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            Iso::open(&p).unwrap().entries().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
         let mut img = udf_image();
         img[301 * 2048] = 7;
         fs::write(&p, &img).unwrap();
-        assert_eq!(Iso::open(&p).unwrap().entries().unwrap_err().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            Iso::open(&p).unwrap().entries().unwrap_err().kind(),
+            io::ErrorKind::InvalidData
+        );
         let mut img = udf_image();
         img[256 * 2048 + 4] ^= 1;
         fs::write(&p, &img).unwrap();
-        assert_eq!(Iso::open(&p).err().unwrap().kind(), io::ErrorKind::InvalidData);
+        assert_eq!(
+            Iso::open(&p).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
         // Truncations and single-byte corruptions must not panic or hang.
         let img = udf_image();
         for len in [0, 100 * 2048, 257 * 2048, 301 * 2048 + 500, 305 * 2048] {
@@ -1033,8 +1337,18 @@ mod tests {
     fn iso_real() {
         let iso = Iso::open(Path::new(&std::env::var("RUSTFUS_ISO").unwrap())).unwrap();
         let es = iso.entries().unwrap();
-        let total: u64 = es.iter().filter(|e| !e.is_dir).map(|e| io::copy(&mut iso.reader(e).unwrap(), &mut io::sink()).unwrap()).sum();
+        let total: u64 = es
+            .iter()
+            .filter(|e| !e.is_dir)
+            .map(|e| io::copy(&mut iso.reader(e).unwrap(), &mut io::sink()).unwrap())
+            .sum();
         assert_eq!(total, es.iter().map(|e| e.size).sum::<u64>());
-        println!("{} {:?} {} entries {total} bytes {:?}", iso.volume_id(), iso.el_torito(), es.len(), &es[..es.len().min(5)]);
+        println!(
+            "{} {:?} {} entries {total} bytes {:?}",
+            iso.volume_id(),
+            iso.el_torito(),
+            es.len(),
+            &es[..es.len().min(5)]
+        );
     }
 }
