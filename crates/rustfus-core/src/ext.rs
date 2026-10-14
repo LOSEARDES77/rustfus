@@ -7,6 +7,7 @@
 //! no flex_bg/64bit. Ext4 adds extents and metadata_csum, which lets inode
 //! tables past group 0 stay unwritten (the kernel zeroes them lazily).
 
+use crate::bytes::{put16, put32};
 use std::collections::BTreeMap;
 use std::io::{self, Seek, SeekFrom, Write};
 
@@ -19,12 +20,6 @@ pub enum Kind {
 
 const ISIZE: usize = 256;
 
-fn put16(b: &mut [u8], at: usize, v: u16) {
-    b[at..at + 2].copy_from_slice(&v.to_le_bytes());
-}
-fn put32(b: &mut [u8], at: usize, v: u32) {
-    b[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg)
 }
@@ -50,7 +45,7 @@ const CRC32C: [u32; 256] = {
 };
 
 /// Raw crc32c (no pre/post inversion), as ext4's checksums use it.
-fn crc32c(crc: u32, data: &[u8]) -> u32 {
+pub(crate) fn crc32c(crc: u32, data: &[u8]) -> u32 {
     data.iter().fold(crc, |c, &b| {
         CRC32C[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8)
     })

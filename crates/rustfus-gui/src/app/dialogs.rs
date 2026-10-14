@@ -109,11 +109,7 @@ impl App {
                 }
             }
             Dialog::Confirm => {
-                let name = self
-                    .selected
-                    .and_then(|i| self.drives.get(i))
-                    .map(|d| d.label())
-                    .unwrap_or_default();
+                let name = self.drive().map(|d| d.label()).unwrap_or_default();
                 modal("confirm", &mut |ui| {
                     ui.heading("⚠ WARNING");
                     ui.label(tf("MSG_003", &[&name]));

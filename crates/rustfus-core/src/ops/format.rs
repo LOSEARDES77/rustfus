@@ -132,24 +132,16 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
         crate::ext::format(&mut vol, p.size, crate::ext::Kind::Ext3, plabel, 0, conf).map_err(e)?;
         vol.flush().map_err(e)?;
     }
+    drop(dev);
     if fs.is_fat() {
-        drop(dev);
         fsos::rescan(&job.drive).ok();
-    } else if ext_kind(fs).is_some() {
-        drop(dev);
-        fsos::rescan(&job.drive)?;
-        if needs_files {
-            let mnt = fsos::mount(&job.drive, 1, fs)?;
-            let r = copy_files(job, &rep, iso.as_ref(), &DirDest::Dir(mnt.clone()), ctx);
-            fsos::unmount(&job.drive, 1, &mnt)?;
-            r?;
-        }
     } else {
-        drop(dev);
         fsos::rescan(&job.drive)?;
-        ctx.progress(0.0, format!("Formatting ({})...", fs.name()));
-        fsos::mkfs(&job.drive, 1, fs, &label, job.cluster)?;
-        if iso.is_some() || job.ext_label || job.boot == Boot::FreeDos {
+        if ext_kind(fs).is_none() {
+            ctx.progress(0.0, format!("Formatting ({})...", fs.name()));
+            fsos::mkfs(&job.drive, 1, fs, &label, job.cluster)?;
+        }
+        if needs_files {
             let mnt = fsos::mount(&job.drive, 1, fs)?;
             let r = copy_files(job, &rep, iso.as_ref(), &DirDest::Dir(mnt.clone()), ctx);
             fsos::unmount(&job.drive, 1, &mnt)?;

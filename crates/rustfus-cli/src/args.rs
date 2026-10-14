@@ -61,13 +61,13 @@ pub struct WriteArgs {
     pub dd: bool,
     /// Partition scheme [default: picked from the image]
     #[arg(long, value_enum)]
-    pub scheme: Option<SchemeArg>,
+    pub scheme: Option<Scheme>,
     /// Target system [default: picked from the image]
     #[arg(long, value_enum)]
-    pub target: Option<TargetArg>,
+    pub target: Option<Target>,
     /// File system [default: picked from the image]
     #[arg(long, value_enum)]
-    pub fs: Option<FsArg>,
+    pub fs: Option<Fs>,
     /// Cluster size in bytes [default: file system default]
     #[arg(long, default_value_t = 0)]
     pub cluster: u32,
@@ -143,32 +143,6 @@ pub struct DownloadArgs {
     pub output: Option<PathBuf>,
 }
 
-#[derive(Clone, Copy, ValueEnum)]
-pub enum SchemeArg {
-    Mbr,
-    Gpt,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum TargetArg {
-    BiosUefi,
-    Uefi,
-    Bios,
-}
-
-#[derive(Clone, Copy, ValueEnum)]
-pub enum FsArg {
-    Fat,
-    Fat32,
-    Ntfs,
-    Udf,
-    Exfat,
-    Refs,
-    Ext2,
-    Ext3,
-    Ext4,
-}
-
 #[derive(Clone, Copy, PartialEq, ValueEnum)]
 pub enum WueArg {
     /// Remove the TPM, Secure Boot and RAM requirements
@@ -185,32 +159,6 @@ pub enum WueArg {
     WtgNoInternal,
 }
 
-impl From<SchemeArg> for Scheme {
-    fn from(s: SchemeArg) -> Self {
-        match s {
-            SchemeArg::Mbr => Scheme::Mbr,
-            SchemeArg::Gpt => Scheme::Gpt,
-        }
-    }
-}
-
-impl From<TargetArg> for Target {
-    fn from(t: TargetArg) -> Self {
-        match t {
-            TargetArg::BiosUefi => Target::BiosUefi,
-            TargetArg::Uefi => Target::Uefi,
-            TargetArg::Bios => Target::Bios,
-        }
-    }
-}
-
-impl From<FsArg> for Fs {
-    fn from(f: FsArg) -> Self {
-        // Same order as `Fs::ALL`.
-        Fs::ALL[f as usize]
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,10 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn fs_args_match_fs_order() {
-        for f in FsArg::value_variants() {
+    fn fs_args_match_fs_names() {
+        for f in Fs::value_variants() {
             let name = f.to_possible_value().unwrap().get_name().to_string();
-            assert_eq!(Fs::from(*f).name().to_lowercase(), name);
+            assert_eq!(f.name().to_lowercase(), name);
         }
     }
 }

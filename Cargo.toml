@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+resolver = "3"
 
 [workspace.package]
 version = "0.1.0"
@@ -11,64 +12,8 @@ repository = "https://github.com/LOSEARDES77/rustfus"
 [workspace.dependencies]
 rustfus-core = { path = "crates/rustfus-core" }
 rustfus-gui = { path = "crates/rustfus-gui" }
-
-[package]
-name = "rustfus"
-description = "Rufus-style bootable USB creator with an egui GUI and a command line, for Linux, macOS and Windows."
-readme = "README.md"
-version.workspace = true
-edition.workspace = true
-rust-version.workspace = true
-license.workspace = true
-repository.workspace = true
-
-[dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
-rustfus-core.workspace = true
-rustfus-gui.workspace = true
 
 [profile.release]
 lto = true
 strip = true
-
-[package.metadata.deb]
-maintainer = "LOSEARDES77 <victor7galan@gmail.com>"
-copyright = "2026 Rustfus contributors; based on Rufus © 2011-2026 Pete Batard"
-license-file = ["LICENSE", "0"]
-section = "admin"
-priority = "optional"
-depends = "$auto, libxkbcommon0, libgl1 | libegl1, policykit-1 | pkexec"
-recommends = "curl, libvulkan1"
-suggests = "ntfs-3g, exfatprogs, udftools"
-extended-description = "Rust rewrite of Rufus: write ISO and disk images to USB drives in ISO or DD mode, with Windows, Linux (GRUB/Syslinux, persistence) and FreeDOS boot support."
-assets = [
-    ["target/release/rustfus", "usr/bin/", "755"],
-    ["packaging/rustfus.desktop", "usr/share/applications/", "644"],
-    ["packaging/io.github.rustfus.policy", "usr/share/polkit-1/actions/", "644"],
-    ["res/rustfus.png", "usr/share/icons/hicolor/256x256/apps/", "644"],
-    ["README.md", "usr/share/doc/rustfus/", "644"],
-    ["THIRD_PARTY_NOTICES.md", "usr/share/doc/rustfus/", "644"],
-]
-
-[package.metadata.generate-rpm]
-license = "GPL-3.0-or-later"
-summary = "Rufus-style bootable USB creator"
-assets = [
-    { source = "target/release/rustfus", dest = "/usr/bin/rustfus", mode = "755" },
-    { source = "packaging/rustfus.desktop", dest = "/usr/share/applications/rustfus.desktop", mode = "644" },
-    { source = "packaging/io.github.rustfus.policy", dest = "/usr/share/polkit-1/actions/io.github.rustfus.policy", mode = "644" },
-    { source = "res/rustfus.png", dest = "/usr/share/icons/hicolor/256x256/apps/rustfus.png", mode = "644" },
-    { source = "LICENSE", dest = "/usr/share/licenses/rustfus/LICENSE", mode = "644", doc = true },
-    { source = "README.md", dest = "/usr/share/doc/rustfus/README.md", mode = "644", doc = true },
-    { source = "THIRD_PARTY_NOTICES.md", dest = "/usr/share/doc/rustfus/THIRD_PARTY_NOTICES.md", mode = "644", doc = true },
-]
-
-[package.metadata.generate-rpm.requires]
-polkit = "*"
-"libxkbcommon.so.0()(64bit)" = "*"
-
-[package.metadata.generate-rpm.recommends]
-curl = "*"
-
-[target.'cfg(windows)'.build-dependencies]
-winresource = "0.1"

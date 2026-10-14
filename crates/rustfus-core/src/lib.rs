@@ -6,6 +6,7 @@
 
 pub mod blockdev;
 pub mod bootrec;
+mod bytes;
 pub mod drives;
 pub mod ext;
 pub mod fat;

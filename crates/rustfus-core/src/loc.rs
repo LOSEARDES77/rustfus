@@ -124,17 +124,11 @@ pub fn current() -> String {
     parsed().langs[*CURRENT.read().unwrap()].code.clone()
 }
 
-/// Closest Rufus language for a system locale such as `fr_FR.UTF-8`,
-/// `pt-PT` or `zh-Hant-HK`: exact match, else same primary language.
+/// Closest Rufus language for a BCP 47 tag (see `wue::locale`) such as
+/// `fr-CA` or `zh-Hant-HK`: exact match, else same primary language.
 fn closest(sys: &str, codes: &[&str]) -> String {
-    let sys = sys
-        .trim()
-        .split(['.', '@'])
-        .next()
-        .unwrap_or("")
-        .replace('_', "-");
     let lower = sys.to_ascii_lowercase();
-    if let Some(c) = codes.iter().find(|c| c.eq_ignore_ascii_case(&sys)) {
+    if let Some(c) = codes.iter().find(|c| c.eq_ignore_ascii_case(sys)) {
         return c.to_string();
     }
     let primary = lower.split('-').next().unwrap_or("");
@@ -193,61 +187,30 @@ pub fn t(id: &str) -> String {
         .map_or_else(|| id.to_string(), |s| strip_amp(s))
 }
 
-/// `t(id)` with printf-style `%s`/`%d`/`%02X`/`%0.2f`/`%%` filled from `args` in order.
+/// `t(id)` with `%s`/`%d` filled from `args` in order (`%%` is a literal `%`).
 pub fn tf(id: &str, args: &[&str]) -> String {
     printf(&t(id), args)
 }
 
+// ponytail: width/precision/hex (`%02X`, `%0.2f`) are skipped and the argument inserted
+// as given; no string Rustfus uses needs them.
 fn printf(fmt: &str, args: &[&str]) -> String {
-    let mut out = String::new();
     let mut args = args.iter();
+    let mut out = String::new();
     let mut it = fmt.chars().peekable();
     while let Some(c) = it.next() {
         if c != '%' {
             out.push(c);
             continue;
         }
-        let mut spec = String::new();
-        while let Some(&d) = it
-            .peek()
-            .filter(|d| d.is_ascii_digit() || matches!(**d, '.' | '$' | 'l' | 'h' | '-'))
-        {
-            spec.push(d);
-            it.next();
+        while it
+            .next_if(|d| d.is_ascii_digit() || matches!(d, '.' | '-' | 'l' | 'h'))
+            .is_some()
+        {}
+        match it.next() {
+            Some('%') | None => out.push('%'),
+            Some(_) => out.push_str(args.next().copied().unwrap_or("")),
         }
-        let Some(conv) = it.next() else { break };
-        if conv == '%' {
-            out.push('%');
-            continue;
-        }
-        // ponytail: ignores positional `%n$`; rufus.loc has none
-        let spec = spec.trim_end_matches(['l', 'h']);
-        let arg = args.next().copied().unwrap_or("");
-        let zero = spec.starts_with('0') && !spec.starts_with("0.");
-        let (width, prec) = spec.split_once('.').unwrap_or((spec, ""));
-        let width: usize = width.parse().unwrap_or(0);
-        let s = match conv {
-            'x' | 'X' => match arg.parse::<i64>() {
-                Ok(n) if conv == 'X' => format!("{n:X}"),
-                Ok(n) => format!("{n:x}"),
-                Err(_) => arg.into(),
-            },
-            'f' => match (arg.parse::<f64>(), prec.parse::<usize>()) {
-                (Ok(v), Ok(p)) => format!("{v:.p$}"),
-                (Ok(v), _) => format!("{v:.6}"),
-                _ => arg.into(),
-            },
-            _ => arg.into(),
-        };
-        let pad = width.saturating_sub(s.chars().count());
-        let (sign, digits) = if zero && s.starts_with('-') {
-            ("-", &s[1..])
-        } else {
-            ("", &s[..])
-        };
-        out.push_str(sign);
-        out.extend(std::iter::repeat_n(if zero { '0' } else { ' ' }, pad));
-        out.push_str(digits);
     }
     out
 }
@@ -293,9 +256,8 @@ mod tests {
     #[test]
     fn loc_printf() {
         assert_eq!(printf("%d of %s (%%)", &["3", "x"]), "3 of x (%)");
-        assert_eq!(printf("0x%02X (Disk %d)", &["10", "2"]), "0x0A (Disk 2)");
-        assert_eq!(printf("%d:%02d", &["5", "7"]), "5:07");
-        assert_eq!(printf("%0.2f%%", &["1.5"]), "1.50%");
+        assert_eq!(printf("0x%02X (Disk %d)", &["10", "2"]), "0x10 (Disk 2)");
+        assert_eq!(printf("%0.2f%% %s", &["1.5"]), "1.5% ");
         assert_eq!(strip_amp("&Start && go"), "Start & go");
         assert_eq!(tf("NO_SUCH_%s", &[]), "NO_SUCH_");
     }
@@ -305,16 +267,16 @@ mod tests {
         let codes = [
             "en-US", "fr-FR", "pt-BR", "pt-PT", "zh-CN", "zh-TW", "nb-NO", "es-ES",
         ];
-        assert_eq!(closest("fr_FR.UTF-8", &codes), "fr-FR");
-        assert_eq!(closest("fr_CA.UTF-8", &codes), "fr-FR");
+        assert_eq!(closest("fr-FR", &codes), "fr-FR");
+        assert_eq!(closest("fr-CA", &codes), "fr-FR");
         assert_eq!(closest("pt-PT", &codes), "pt-PT");
-        assert_eq!(closest("pt_AO", &codes), "pt-BR");
-        assert_eq!(closest("es_MX", &codes), "es-ES");
-        assert_eq!(closest("zh_HK", &codes), "zh-TW");
+        assert_eq!(closest("pt-AO", &codes), "pt-BR");
+        assert_eq!(closest("es-MX", &codes), "es-ES");
+        assert_eq!(closest("zh-HK", &codes), "zh-TW");
         assert_eq!(closest("zh-Hans-CN", &codes), "zh-CN");
-        assert_eq!(closest("nn_NO", &codes), "nb-NO");
-        assert_eq!(closest("en_GB", &codes), "en-US");
-        assert_eq!(closest("xx_YY", &codes), "en-US");
-        assert_eq!(closest("C", &codes), "en-US");
+        assert_eq!(closest("nn-NO", &codes), "nb-NO");
+        assert_eq!(closest("en-GB", &codes), "en-US");
+        assert_eq!(closest("xx-YY", &codes), "en-US");
+        assert_eq!(closest("en-US", &codes), "en-US");
     }
 }

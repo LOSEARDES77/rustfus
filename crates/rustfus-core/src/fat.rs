@@ -5,22 +5,10 @@
 //! so the ms-sys boot records fit), plus a fix-up for fatfs' directory dot
 //! entries. File contents are written with the fatfs crate.
 
+use crate::bytes::{get16, get32, put16, put32};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 const BPS: u64 = 512;
-
-fn put16(b: &mut [u8], at: usize, v: u16) {
-    b[at..at + 2].copy_from_slice(&v.to_le_bytes());
-}
-fn put32(b: &mut [u8], at: usize, v: u32) {
-    b[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
-fn get16(b: &[u8], at: usize) -> u64 {
-    u16::from_le_bytes([b[at], b[at + 1]]) as u64
-}
-fn get32(b: &[u8], at: usize) -> u64 {
-    u32::from_le_bytes(b[at..at + 4].try_into().unwrap()) as u64
-}
 
 fn invalid(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, msg)
@@ -200,14 +188,14 @@ impl Layout {
         let mut b = [0u8; 512];
         dev.seek(SeekFrom::Start(0))?;
         dev.read_exact(&mut b)?;
-        let (spc, reserved) = (b[0x0D] as u64, get16(&b, 0x0E));
+        let (spc, reserved) = (b[0x0D] as u64, get16(&b, 0x0E) as u64);
         let fat32 = get16(&b, 0x16) == 0;
         let fatsz = if fat32 {
-            get32(&b, 0x24)
+            get32(&b, 0x24) as u64
         } else {
-            get16(&b, 0x16)
+            get16(&b, 0x16) as u64
         };
-        let root_sectors = (get16(&b, 0x11) * 32).div_ceil(BPS);
+        let root_sectors = (get16(&b, 0x11) as u64 * 32).div_ceil(BPS);
         let fat_start = reserved * BPS;
         let root_start = fat_start + b[0x10] as u64 * fatsz * BPS;
         Ok(Layout {
@@ -215,7 +203,7 @@ impl Layout {
             fat_start,
             root_start,
             data_start: root_start + root_sectors * BPS,
-            root_cluster: if fat32 { get32(&b, 0x2C) } else { 0 },
+            root_cluster: if fat32 { get32(&b, 0x2C) as u64 } else { 0 },
             fat32,
         })
     }
@@ -234,9 +222,9 @@ impl Layout {
         dev.seek(SeekFrom::Start(self.fat_start + c * n as u64))?;
         dev.read_exact(&mut b[..n])?;
         let v = if self.fat32 {
-            get32(&b, 0) & 0x0FFF_FFFF
+            (get32(&b, 0) & 0x0FFF_FFFF) as u64
         } else {
-            get16(&b, 0)
+            get16(&b, 0) as u64
         };
         Ok((2..eoc).contains(&v).then_some(v))
     }
@@ -271,7 +259,7 @@ impl Layout {
 }
 
 fn entry_cluster(e: &[u8]) -> u64 {
-    (get16(e, 20) << 16) | get16(e, 26)
+    ((get16(e, 20) as u64) << 16) | get16(e, 26) as u64
 }
 
 fn set_cluster(e: &mut [u8], c: u64) {

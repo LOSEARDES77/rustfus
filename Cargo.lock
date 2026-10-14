@@ -3082,7 +3082,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustfus"
+name = "rustfus-cli"
 version = "0.1.0"
 dependencies = [
  "clap",
@@ -3096,6 +3096,7 @@ name = "rustfus-core"
 version = "0.1.0"
 dependencies = [
  "bzip2",
+ "clap",
  "crc32fast",
  "fatfs",
  "flate2",

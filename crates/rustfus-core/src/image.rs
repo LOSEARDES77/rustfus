@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-#![allow(dead_code)]
 use std::collections::HashSet;
 use std::fs::{File, OpenOptions};
 use std::io::{self, BufReader, Read, Seek, SeekFrom, Write};
@@ -203,11 +202,11 @@ pub fn hashes(path: &Path, progress: &dyn Fn(f32), cancel: &AtomicBool) -> io::R
 }
 
 /// Without this, Linux would read back the page cache instead of the device.
-#[cfg(target_os = "linux")]
-fn drop_cache(f: &File) {
-    use std::os::fd::AsRawFd;
+pub(crate) fn drop_cache(_f: &File) {
+    #[cfg(target_os = "linux")]
     unsafe {
-        libc::posix_fadvise(f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
+        use std::os::fd::AsRawFd;
+        libc::posix_fadvise(_f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
     }
 }
 
@@ -355,7 +354,6 @@ pub fn bad_blocks(
             }
             if phase == 0 {
                 f.sync_all()?;
-                #[cfg(target_os = "linux")]
                 drop_cache(&f);
             }
         }

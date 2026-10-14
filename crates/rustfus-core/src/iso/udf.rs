@@ -107,7 +107,7 @@ impl Udf {
     pub(super) fn block(&self, f: &File, part: u16, lbn: u32) -> io::Result<(u64, [u8; 2048])> {
         let off = self.map(part, lbn, BLK)?[0].0;
         let mut b = [0u8; 2048];
-        read_exact_at(f, &mut b, off)?;
+        crate::blockdev::read_at(f, &mut b, off)?;
         Ok((off, b))
     }
 
@@ -230,7 +230,7 @@ impl Iso {
         let mut b = [0u8; 2048];
         let mut boot = ElTorito::default();
         for s in 16..64 {
-            if read_exact_at(&f, &mut b, s * BLK).is_err() {
+            if crate::blockdev::read_at(&f, &mut b, s * BLK).is_err() {
                 break;
             }
             if &b[1..6] == b"CD001" {
@@ -243,12 +243,12 @@ impl Iso {
                 }
             }
         }
-        read_exact_at(&f, &mut b, 256 * BLK)?;
+        crate::blockdev::read_at(&f, &mut b, 256 * BLK)?;
         tag(&b, 2).map_err(|_| bad("not an ISO9660 or UDF image"))?;
         let (vds_len, vds_loc) = (le32(&b, 16) as u64, le32(&b, 20) as u64);
         let (mut pds, mut lvd, mut vol) = (Vec::<(u16, u64)>::new(), None, String::new());
         for s in vds_loc..vds_loc + (vds_len / BLK).min(256) {
-            read_exact_at(&f, &mut b, s * BLK)?;
+            crate::blockdev::read_at(&f, &mut b, s * BLK)?;
             let id = le16(&b, 0);
             if tag(&b, id).is_err() {
                 break;

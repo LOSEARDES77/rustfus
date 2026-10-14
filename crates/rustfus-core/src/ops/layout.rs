@@ -40,7 +40,20 @@ pub(super) fn layout(job: &Job, uefi_ntfs: bool) -> Vec<part::Part> {
         MB
     };
     let mut end = (job.drive.size - if gpt { 34 * part::SECTOR } else { 0 }) / MB * MB;
+    // Carved from the end of the disk: UEFI:NTFS last, persistence before it.
     let mut extra = Vec::new();
+    if uefi_ntfs {
+        let size = (UEFI_NTFS.len() as u64).next_multiple_of(MB);
+        end -= size;
+        extra.push(part::Part {
+            start: end,
+            size,
+            mbr_type: 0xEF,
+            gpt_type: part::GPT_ESP,
+            name: "UEFI:NTFS",
+            active: false,
+        });
+    }
     if job.persistence > 0 {
         let size = job.persistence / MB * MB;
         end -= size;
@@ -53,24 +66,7 @@ pub(super) fn layout(job: &Job, uefi_ntfs: bool) -> Vec<part::Part> {
             active: false,
         });
     }
-    if uefi_ntfs {
-        let size = (UEFI_NTFS.len() as u64).next_multiple_of(MB);
-        end -= size;
-        for p in &mut extra {
-            p.start -= size;
-        }
-        extra.push(part::Part {
-            start: end + job.persistence / MB * MB,
-            size,
-            mbr_type: 0xEF,
-            gpt_type: part::GPT_ESP,
-            name: "UEFI:NTFS",
-            active: false,
-        });
-        if job.persistence == 0 {
-            extra.last_mut().unwrap().start = end;
-        }
-    }
+    extra.reverse();
     let bootable = job.boot != Boot::NonBootable && job.target != Target::Uefi;
     let main = part::Part {
         start,
@@ -97,7 +93,7 @@ pub(super) fn mbr_kind(job: &Job, rep: &Report, sl: Option<&syslinux::Info>) -> 
     if rep.grub2 {
         return bootrec::Mbr::Grub2;
     }
-    bootrec::Mbr::Rufus { bios_id: None }
+    bootrec::Mbr::Rufus
 }
 
 pub(super) fn ext_kind(fs: Fs) -> Option<crate::ext::Kind> {
@@ -110,11 +106,7 @@ pub(super) fn ext_kind(fs: Fs) -> Option<crate::ext::Kind> {
 }
 
 pub(super) fn fat_label(label: &str) -> [u8; 11] {
-    let mut l = [b' '; 11];
-    for (d, s) in l.iter_mut().zip(label.bytes()) {
-        *d = s;
-    }
-    l
+    format!("{label:<11}").as_bytes()[..11].try_into().unwrap()
 }
 
 pub(super) fn zero_range(

@@ -4,14 +4,12 @@
 // Copyright © 2012 Pete Batard (GPL-2.0-or-later).
 //! Boot record writers ported from Rufus' ms-sys (src/ms-sys/{br,fat32,ntfs,partition_info}.c).
 //! Offsets are relative to the stream start (disk for MBRs, partition for PBRs).
-#![allow(dead_code)]
-
+use crate::bytes::put;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
 const MBR_WIN7: &[u8] = include_bytes!("../../../res/ms-sys/mbr_win7.bin");
 const MBR_RUFUS: &[u8] = include_bytes!("../../../res/ms-sys/mbr_rufus.bin");
 const MBR_SYSLINUX: &[u8] = include_bytes!("../../../res/ms-sys/mbr_syslinux.bin");
-const MBR_GPT_SYSLINUX: &[u8] = include_bytes!("../../../res/ms-sys/mbr_gpt_syslinux.bin");
 // ms-sys mbr_grub2.h is byte-identical to boot.img[..0x1b0] (jump @0x66 already NOPed).
 const GRUB2_BOOT_IMG: &[u8] = include_bytes!("../../../res/grub2/boot.img");
 const FAT32_0X0: &[u8] = include_bytes!("../../../res/ms-sys/br_fat32_0x0.bin");
@@ -26,13 +24,8 @@ const NTFS_0X54: &[u8] = include_bytes!("../../../res/ms-sys/br_ntfs_0x54.bin");
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mbr {
     Win7,
-    /// `bios_id` (0x80..=0x8F) goes in the first partition entry's status byte (0x1BE), which the
-    /// Rufus MBR uses as the drive number to masquerade the USB as (Rufus: 0x81 for WinPE).
-    Rufus {
-        bios_id: Option<u8>,
-    },
+    Rufus,
     Syslinux,
-    GptSyslinux,
     Grub2,
     /// GPT protective MBR that prints the "UEFI-only media" message stored at LBA 34.
     RufusMsg,
@@ -62,10 +55,6 @@ fn rmw<F: Read + Write + Seek>(
 
 const FSINFO_FREE: usize = 0x3e8;
 
-fn put(buf: &mut [u8], off: usize, data: &[u8]) {
-    buf[off..off + data.len()].copy_from_slice(data);
-}
-
 fn bad(msg: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, msg)
 }
@@ -74,30 +63,16 @@ fn bad(msg: &str) -> io::Error {
 pub fn write_mbr<F: Read + Write + Seek>(disk: &mut F, kind: Mbr) -> io::Result<()> {
     let code = match kind {
         Mbr::Win7 => MBR_WIN7,
-        Mbr::Rufus { .. } => MBR_RUFUS,
+        Mbr::Rufus => MBR_RUFUS,
         Mbr::Syslinux => MBR_SYSLINUX,
-        Mbr::GptSyslinux => MBR_GPT_SYSLINUX,
         Mbr::RufusMsg => MBR_MSG_RUFUS,
         // TODO: Rufus also writes core.img at LBA 1 (WriteSBR); boot.img's kernel_sector (0x5C) is 1.
         Mbr::Grub2 => &GRUB2_BOOT_IMG[..0x1b0],
         // ms-sys zeroes 0..0x1BE (incl. disk signature); we keep the signature.
         Mbr::Zero => &[0; 440],
     };
-    let bios_id = match kind {
-        Mbr::Rufus { bios_id: Some(id) } if !(0x80..=0x8f).contains(&id) => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "BIOS ID must be 0x80..=0x8F",
-            ));
-        }
-        Mbr::Rufus { bios_id } => bios_id,
-        _ => None,
-    };
     rmw(disk, 0, 512, |b| {
         put(b, 0, code);
-        if let Some(id) = bios_id {
-            b[0x1be] = id;
-        }
         put(b, 0x1fe, &[0x55, 0xaa]); // ms-sys write_bootmark
         Ok(())
     })
@@ -193,15 +168,8 @@ mod tests {
         let orig = noise(1024, 0x1234_5678);
         let kinds = [
             (Mbr::Win7, MBR_WIN7),
-            (Mbr::Rufus { bios_id: None }, MBR_RUFUS),
-            (
-                Mbr::Rufus {
-                    bios_id: Some(0x81),
-                },
-                MBR_RUFUS,
-            ),
+            (Mbr::Rufus, MBR_RUFUS),
             (Mbr::Syslinux, MBR_SYSLINUX),
-            (Mbr::GptSyslinux, MBR_GPT_SYSLINUX),
             (Mbr::Grub2, &GRUB2_BOOT_IMG[..0x1b0]),
             (Mbr::Zero, &[0; 440]),
         ];
@@ -210,27 +178,10 @@ mod tests {
             write_mbr(&mut c, kind).unwrap();
             let d = c.into_inner();
             assert_eq!(&d[..code.len()], code, "{kind:?}");
-            assert_eq!(d[code.len()..0x1be], orig[code.len()..0x1be], "{kind:?}");
-            let id = if let Mbr::Rufus { bios_id: Some(id) } = kind {
-                id
-            } else {
-                orig[0x1be]
-            };
-            assert_eq!(d[0x1be], id);
-            assert_eq!(d[0x1bf..0x1fe], orig[0x1bf..0x1fe]);
+            assert_eq!(d[code.len()..0x1fe], orig[code.len()..0x1fe], "{kind:?}");
             assert_eq!(d[0x1fe..0x200], [0x55, 0xaa]);
             assert_eq!(d[0x200..], orig[0x200..]);
         }
-        let mut c = Cursor::new(orig);
-        assert!(
-            write_mbr(
-                &mut c,
-                Mbr::Rufus {
-                    bios_id: Some(0x90)
-                }
-            )
-            .is_err()
-        );
     }
 
     #[test]

@@ -5,8 +5,8 @@ fn main() {
     #[cfg(windows)]
     if std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         let mut res = winresource::WindowsResource::new();
-        res.set_icon("res/rustfus.ico")
-            .set_manifest_file("packaging/rustfus.manifest");
+        res.set_icon("../../res/rustfus.ico")
+            .set_manifest_file("../../packaging/rustfus.manifest");
         res.compile().expect("compiling Windows resources");
     }
 }

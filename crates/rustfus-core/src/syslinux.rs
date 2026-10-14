@@ -7,6 +7,7 @@
 //! Syslinux support for ISO mode on FAT, ported from Rufus' syslinux.c/iso.c
 //! and Syslinux' libinstaller (syslxmod.c, fs.c, setadv.c).
 
+use crate::bytes::{get16, get32, put16, put32, put64};
 use std::io::{Read, Seek, SeekFrom, Write};
 
 const V4_SYS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v4.sys");
@@ -37,19 +38,6 @@ pub struct Info {
     pub reactos: Option<String>,
     /// Obsolete menu.c32/vesamenu.c32 to replace (Syslinux < 5 only).
     pub old_c32: Vec<String>,
-}
-
-fn get16(b: &[u8], at: usize) -> u16 {
-    u16::from_le_bytes([b[at], b[at + 1]])
-}
-fn get32(b: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
-}
-fn put32(b: &mut [u8], at: usize, v: u32) {
-    b[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
-fn put64(b: &mut [u8], at: usize, v: u64) {
-    b[at..at + 8].copy_from_slice(&v.to_le_bytes());
 }
 
 /// C strtoul on a NUL-terminated buffer: (value, end index).
@@ -448,7 +436,7 @@ fn generate_extents(
     }
     for (k, (lba, len)) in out.into_iter().enumerate() {
         put64(img, at + k * 10, lba);
-        img[at + k * 10 + 8..at + k * 10 + 10].copy_from_slice(&(len as u16).to_le_bytes());
+        put16(img, at + k * 10 + 8, len as u16);
     }
     Ok(())
 }
@@ -487,8 +475,8 @@ fn patch(img: &mut [u8], bss: &mut [u8], sectors: &[u64], subdir: &str) -> Resul
     let sectors = &sectors[1..];
 
     let dw = img.len() / 4;
-    img[pa + 8..pa + 10].copy_from_slice(&((nsect - 2) as u16).to_le_bytes());
-    img[pa + 10..pa + 12].copy_from_slice(&2u16.to_le_bytes());
+    put16(img, pa + 8, (nsect - 2) as u16);
+    put16(img, pa + 10, 2);
     put32(img, pa + 12, dw as u32);
     generate_extents(img, secptr, secptrcnt, &sectors[..nsect - 3])?;
     put64(img, advptr, sectors[nsect - 3]);
@@ -578,6 +566,7 @@ pub fn install<F: Read + Write + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::bytes::get64;
     use std::process::Command;
 
     #[test]
@@ -704,10 +693,7 @@ mod tests {
         assert_eq!(sector(s0), file[..512]);
         let (mut k, mut ex) = (1usize, fld(5));
         while k < data_sectors {
-            let (lba, len) = (
-                u64::from_le_bytes(file[ex..ex + 8].try_into().unwrap()),
-                get16(&file, ex + 8) as u64,
-            );
+            let (lba, len) = (get64(&file, ex), get16(&file, ex + 8) as u64);
             assert!(len > 0, "extents end before sector {k}");
             for j in 0..len {
                 assert_eq!(
@@ -721,7 +707,7 @@ mod tests {
         }
         let adv = fld(0);
         for n in 0..2 {
-            let s = u64::from_le_bytes(file[adv + 8 * n..adv + 8 * n + 8].try_into().unwrap());
+            let s = get64(&file, adv + 8 * n);
             assert_eq!(sector(s), file[padded + 512 * n..padded + 512 * (n + 1)]);
             assert_eq!(get32(&sector(s), 0), 0x5a2d_2fa5);
         }

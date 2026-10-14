@@ -18,10 +18,11 @@ pub fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<()> {
     {
         let mut done = 0;
         while done < buf.len() {
-            match std::os::windows::fs::FileExt::seek_read(f, &mut buf[done..], off + done as u64)?
-            {
-                0 => return Err(io::ErrorKind::UnexpectedEof.into()),
-                n => done += n,
+            match std::os::windows::fs::FileExt::seek_read(f, &mut buf[done..], off + done as u64) {
+                Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+                Ok(n) => done += n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
             }
         }
         Ok(())
@@ -35,7 +36,11 @@ pub fn write_at(f: &File, buf: &[u8], off: u64) -> io::Result<()> {
     {
         let mut done = 0;
         while done < buf.len() {
-            done += std::os::windows::fs::FileExt::seek_write(f, &buf[done..], off + done as u64)?;
+            match std::os::windows::fs::FileExt::seek_write(f, &buf[done..], off + done as u64) {
+                Ok(n) => done += n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
+            }
         }
         Ok(())
     }

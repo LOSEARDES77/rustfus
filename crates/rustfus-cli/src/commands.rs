@@ -175,9 +175,9 @@ fn write(a: WriteArgs) -> Result<(), String> {
     } else {
         (Scheme::Mbr, Target::BiosUefi)
     };
-    let scheme = a.scheme.map_or(scheme, Scheme::from);
+    let scheme = a.scheme.unwrap_or(scheme);
     let target = match (a.target, a.scheme) {
-        (Some(t), _) => t.into(),
+        (Some(t), _) => t,
         // Like the GUI: picking a scheme resets the target to its default.
         (None, Some(_)) if scheme == Scheme::Gpt => Target::Uefi,
         (None, Some(_)) => Target::BiosUefi,
@@ -186,14 +186,11 @@ fn write(a: WriteArgs) -> Result<(), String> {
     if scheme == Scheme::Gpt && target != Target::Uefi {
         return Err("GPT drives can only target UEFI".into());
     }
-    let fs = a.fs.map_or(
-        if iso_mode {
-            report.default_fs()
-        } else {
-            Fs::Fat32
-        },
-        Fs::from,
-    );
+    let fs = a.fs.unwrap_or(if iso_mode {
+        report.default_fs()
+    } else {
+        Fs::Fat32
+    });
     if !fs.supported() {
         return Err(format!("{} cannot be created on this OS", fs.name()));
     }

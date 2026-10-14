@@ -51,7 +51,7 @@ The code is split into a workspace:
 
 | Crate | Contents |
 |---|---|
-| `rustfus` (root) | The `rustfus` executable: the command line, or the GUI when run without arguments |
+| `crates/rustfus-cli` | The `rustfus` executable (the only binary): the command line, or the GUI when run without arguments |
 | `crates/rustfus-core` | Engine: drive listing, image analysis, partitioning, file systems, boot code, downloads |
 | `crates/rustfus-gui` | The Rufus-style egui interface |
 

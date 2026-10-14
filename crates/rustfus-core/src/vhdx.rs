@@ -2,6 +2,8 @@
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Dynamic VHDX writer (MS-VHDX) and sparse readers for dynamic VHDX/VHD.
+use crate::bytes::{get16, get32, get64, put, put16, put32, put64};
+use crate::part::random_guid;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
@@ -20,37 +22,15 @@ const PAGE83: &str = "BECA12AB-B2E6-4523-93EF-C309E000C746";
 const LOGICAL_SECTOR: &str = "8141BF1D-A96F-4709-BA47-F233A8FAAB5F";
 const PHYSICAL_SECTOR: &str = "CDA348C7-445D-4471-9CC9-E9885251C556";
 
-const CRC_TABLE: [u32; 256] = {
-    let mut t = [0u32; 256];
-    let mut i = 0;
-    while i < 256 {
-        let mut c = i as u32;
-        let mut k = 0;
-        while k < 8 {
-            c = if c & 1 != 0 {
-                (c >> 1) ^ 0x82F6_3B78
-            } else {
-                c >> 1
-            };
-            k += 1;
-        }
-        t[i] = c;
-        i += 1;
-    }
-    t
-};
-
 pub fn crc32c(data: &[u8]) -> u32 {
-    !data.iter().fold(!0u32, |c, &b| {
-        CRC_TABLE[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8)
-    })
+    !crate::ext::crc32c(!0, data)
 }
 
 /// Stores the CRC-32C of `buf` (with the checksum field zeroed) at offset 4.
 fn seal(buf: &mut [u8]) {
     buf[4..8].fill(0);
     let c = crc32c(buf);
-    buf[4..8].copy_from_slice(&c.to_le_bytes());
+    put32(buf, 4, c);
 }
 
 fn sealed(buf: &[u8]) -> bool {
@@ -70,27 +50,6 @@ fn guid(s: &str) -> [u8; 16] {
     g[4..6].reverse();
     g[6..8].reverse();
     g
-}
-
-fn random_guid() -> [u8; 16] {
-    let mut g = [0u8; 16];
-    g[..8].copy_from_slice(&crate::part::random_u64().to_le_bytes());
-    g[8..].copy_from_slice(&crate::part::random_u64().to_le_bytes());
-    g[7] = (g[7] & 0x0F) | 0x40;
-    g[8] = (g[8] & 0x3F) | 0x80;
-    g
-}
-
-fn put(buf: &mut [u8], off: usize, v: &[u8]) {
-    buf[off..off + v.len()].copy_from_slice(v);
-}
-
-fn u32_at(b: &[u8], off: usize) -> u32 {
-    u32::from_le_bytes(b[off..off + 4].try_into().unwrap())
-}
-
-fn u64_at(b: &[u8], off: usize) -> u64 {
-    u64::from_le_bytes(b[off..off + 8].try_into().unwrap())
 }
 
 fn invalid(msg: impl Into<String>) -> io::Error {
@@ -154,27 +113,27 @@ pub fn save(
     for (seq, off) in [(1u64, 64 * KB), (2, 128 * KB)] {
         let h = &mut head[off..off + 4 * KB];
         put(h, 0, b"head");
-        put(h, 8, &seq.to_le_bytes());
+        put64(h, 8, seq);
         put(h, 16, &fw);
         put(h, 32, &dw);
         // LogGuid stays zero: nothing to replay.
-        put(h, 66, &1u16.to_le_bytes());
-        put(h, 68, &(MB as u32).to_le_bytes());
-        put(h, 72, &log_off.to_le_bytes());
+        put16(h, 66, 1);
+        put32(h, 68, MB as u32);
+        put64(h, 72, log_off);
         seal(h);
     }
     let mut rt = vec![0u8; 64 * KB];
     put(&mut rt, 0, b"regi");
-    put(&mut rt, 8, &2u32.to_le_bytes());
+    put32(&mut rt, 8, 2);
     for (i, (id, off, len)) in [(BAT_GUID, bat_off, bat_len), (META_GUID, meta_off, MB)]
         .into_iter()
         .enumerate()
     {
         let e = 16 + i * 32;
         put(&mut rt, e, &guid(id));
-        put(&mut rt, e + 16, &off.to_le_bytes());
-        put(&mut rt, e + 24, &(len as u32).to_le_bytes());
-        put(&mut rt, e + 28, &1u32.to_le_bytes()); // required
+        put64(&mut rt, e + 16, off);
+        put32(&mut rt, e + 24, len as u32);
+        put32(&mut rt, e + 28, 1); // required
     }
     seal(&mut rt);
     put(&mut head, 192 * KB, &rt);
@@ -193,14 +152,14 @@ pub fn save(
         (LOGICAL_SECTOR, 6, (SECTOR as u32).to_le_bytes().to_vec()),
         (PHYSICAL_SECTOR, 6, (SECTOR as u32).to_le_bytes().to_vec()),
     ];
-    put(&mut meta, 10, &(items.len() as u16).to_le_bytes());
+    put16(&mut meta, 10, items.len() as u16);
     let mut off = 64 * KB;
     for (i, (id, flags, data)) in items.iter().enumerate() {
         let e = 32 + i * 32;
         put(&mut meta, e, &guid(id));
-        put(&mut meta, e + 16, &(off as u32).to_le_bytes());
-        put(&mut meta, e + 20, &(data.len() as u32).to_le_bytes());
-        put(&mut meta, e + 24, &flags.to_le_bytes()); // bit 1: virtual disk, bit 2: required
+        put32(&mut meta, e + 16, off as u32);
+        put32(&mut meta, e + 20, data.len() as u32);
+        put32(&mut meta, e + 24, *flags); // bit 1: virtual disk, bit 2: required
         put(&mut meta, off, data);
         off += data.len();
     }
@@ -260,12 +219,12 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
         .iter()
         .map(|&o| &head[o..o + 4 * KB])
         .filter(|h| &h[..4] == b"head" && sealed(h))
-        .max_by_key(|h| u64_at(h, 8))
+        .max_by_key(|h| get64(h, 8))
         .ok_or_else(|| invalid("VHDX headers are corrupted"))?;
     let log_guid = &h[48..64];
     if log_guid.iter().any(|&b| b != 0) {
         // Any log entry tagged with the active log GUID may hold unapplied writes.
-        let (log_off, log_len) = (u64_at(h, 72), u32_at(h, 68) as usize);
+        let (log_off, log_len) = (get64(h, 72), get32(h, 68) as usize);
         let log = read_at(&mut f, log_off, log_len)?;
         if log
             .chunks(4 * KB)
@@ -282,10 +241,10 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
         .find(|r| &r[..4] == b"regi" && sealed(r))
         .ok_or_else(|| invalid("VHDX region table is corrupted"))?;
     let region = |id: &str| {
-        (0..u32_at(rt, 8).min(2047) as usize)
+        (0..get32(rt, 8).min(2047) as usize)
             .map(|i| &rt[16 + i * 32..48 + i * 32])
             .find(|e| e[..16] == guid(id))
-            .map(|e| (u64_at(e, 16), u32_at(e, 24)))
+            .map(|e| (get64(e, 16), get32(e, 24)))
             .ok_or_else(|| invalid("VHDX region table lacks BAT or metadata"))
     };
     let ((bat_off, bat_len), (meta_off, meta_len)) = (region(BAT_GUID)?, region(META_GUID)?);
@@ -294,20 +253,20 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
         return Err(invalid("VHDX metadata table is corrupted"));
     }
     let item = |id: &str, need: usize| {
-        (0..u16::from_le_bytes([meta[10], meta[11]]).min(2047) as usize)
+        (0..get16(&meta, 10).min(2047) as usize)
             .map(|i| &meta[32 + i * 32..64 + i * 32])
-            .find(|e| e[..16] == guid(id) && u32_at(e, 20) as usize >= need)
-            .and_then(|e| meta.get(u32_at(e, 16) as usize..u32_at(e, 16) as usize + need))
+            .find(|e| e[..16] == guid(id) && get32(e, 20) as usize >= need)
+            .and_then(|e| meta.get(get32(e, 16) as usize..get32(e, 16) as usize + need))
             .ok_or_else(|| invalid(format!("VHDX metadata item {id} is missing")))
     };
     let params = item(FILE_PARAMS, 8)?;
-    if u32_at(params, 4) & 2 != 0 {
+    if get32(params, 4) & 2 != 0 {
         return Err(invalid(
             "Differencing VHDX images are not supported; merge or convert it first",
         ));
     }
-    let (block, size) = (u32_at(params, 0) as u64, u64_at(item(DISK_SIZE, 8)?, 0));
-    let sector = u32_at(item(LOGICAL_SECTOR, 4)?, 0) as u64;
+    let (block, size) = (get32(params, 0) as u64, get64(item(DISK_SIZE, 8)?, 0));
+    let sector = get32(item(LOGICAL_SECTOR, 4)?, 0) as u64;
     if !(MB..=256 * MB).contains(&block)
         || !block.is_power_of_two()
         || ![512, 4096].contains(&sector)
@@ -326,7 +285,7 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
     }
     let bat = read_at(&mut f, bat_off, entries as usize * 8)?;
     let map = (0..blocks)
-        .map(|b| match u64_at(&bat, bat_index(b, cr) * 8) {
+        .map(|b| match get64(&bat, bat_index(b, cr) * 8) {
             e if e & 7 == FULLY_PRESENT => Ok(Some(e >> 20 << 20)),
             e if e & 7 == 7 => Err(invalid("Partially present VHDX blocks are not supported")),
             _ => Ok(None),

@@ -73,22 +73,17 @@ fn component(name: &str, arch: &str, body: &str) -> String {
 }
 
 fn commands(tag: &str, inner: &str, cmds: &[String]) -> String {
+    let field = if inner == "SynchronousCommand" {
+        "CommandLine"
+    } else {
+        "Path"
+    };
     let mut s = format!("      <{tag}>\n");
     for (i, c) in cmds.iter().enumerate() {
         s += &format!(
-            "        <{inner} wcm:action=\"add\">\n          <Order>{}</Order>\n          <{}>{}</{}>\n        </{inner}>\n",
+            "        <{inner} wcm:action=\"add\">\n          <Order>{}</Order>\n          <{field}>{}</{field}>\n        </{inner}>\n",
             i + 1,
-            if inner == "SynchronousCommand" {
-                "CommandLine"
-            } else {
-                "Path"
-            },
             escape(c),
-            if inner == "SynchronousCommand" {
-                "CommandLine"
-            } else {
-                "Path"
-            },
         );
     }
     s + &format!("      </{tag}>\n")

@@ -5,15 +5,6 @@
 
 use super::*;
 
-/// Without this, Linux verification would read back the page cache.
-pub(super) fn drop_cache(_f: &File) {
-    #[cfg(target_os = "linux")]
-    unsafe {
-        use std::os::fd::AsRawFd;
-        libc::posix_fadvise(_f.as_raw_fd(), 0, 0, libc::POSIX_FADV_DONTNEED);
-    }
-}
-
 pub(super) fn read_full(r: &mut dyn Read, buf: &mut [u8]) -> Result<usize, String> {
     let mut n = 0;
     while n < buf.len() {
@@ -47,7 +38,7 @@ pub(super) fn write_dd(img: &Path, d: &Drive, verify: bool, ctx: &Ctx) -> Result
     let dev = open_dev(d)?;
     let written = copy(src, &dev, d.size, ctx)?;
     if verify {
-        drop_cache(&dev);
+        image::drop_cache(&dev);
         verify_dev(image::open(img).map_err(e)?, &dev, written, ctx)?;
     }
     Ok(format!("Wrote {} to {}", human(written), d.path))

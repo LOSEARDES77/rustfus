@@ -141,10 +141,10 @@ jobs:
         run: |
           version=${GITHUB_REF_NAME#v}
           mkdir -p dist
-          cargo deb --no-build --target ${{ matrix.target }} --deb-version "${version}-1" -o dist/
+          cargo deb -p rustfus-cli --no-build --target ${{ matrix.target }} --deb-version "${version}-1" -o dist/
           # RPM versions can't contain '-'; '~' sorts pre-releases correctly.
           rpm_version=$(echo "$version" | tr - '~')
-          cargo generate-rpm --target ${{ matrix.target }} -s "version = \"$rpm_version\"" -o dist/
+          cargo generate-rpm -p crates/rustfus-cli --target ${{ matrix.target }} -s "version = \"$rpm_version\"" -o dist/
           packaging/appimage.sh "target/${{ matrix.target }}/release/rustfus" "$version" ${{ matrix.arch }} dist
           ls -la dist
       - uses: actions/upload-artifact@v4

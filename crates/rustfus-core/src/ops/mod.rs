@@ -35,12 +35,14 @@ pub enum Msg {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Scheme {
     Mbr,
     Gpt,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Target {
     BiosUefi,
     Uefi,
@@ -58,6 +60,7 @@ impl Target {
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Fs {
     Fat,
     Fat32,

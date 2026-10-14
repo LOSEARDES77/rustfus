@@ -2,6 +2,7 @@
 // Copyright © 2026 Rustfus contributors
 //! MBR and GPT partition table writers.
 
+use crate::bytes::{put, put32, put64};
 use std::hash::{BuildHasher, Hasher};
 use std::io::{self, Seek, SeekFrom, Write};
 
@@ -46,7 +47,7 @@ pub fn random_u64() -> u64 {
     h.finish()
 }
 
-fn random_guid() -> [u8; 16] {
+pub(crate) fn random_guid() -> [u8; 16] {
     let mut g = [0u8; 16];
     g[..8].copy_from_slice(&random_u64().to_le_bytes());
     g[8..].copy_from_slice(&random_u64().to_le_bytes());
@@ -82,13 +83,13 @@ fn mbr_entry(e: &mut [u8], p: &Part) {
     e[1..4].copy_from_slice(&chs(lba));
     e[4] = p.mbr_type;
     e[5..8].copy_from_slice(&chs(lba + n - 1));
-    e[8..12].copy_from_slice(&(lba as u32).to_le_bytes());
-    e[12..16].copy_from_slice(&(n as u32).to_le_bytes());
+    put32(e, 8, lba as u32);
+    put32(e, 12, n as u32);
 }
 
 fn write_sector0<D: Write + Seek>(dev: &mut D, entries: &[Part]) -> io::Result<()> {
     let mut s = [0u8; 512];
-    s[440..444].copy_from_slice(&(random_u64() as u32).to_le_bytes());
+    put32(&mut s, 440, random_u64() as u32);
     for (i, p) in entries.iter().enumerate().take(4) {
         mbr_entry(&mut s[446 + i * 16..462 + i * 16], p);
     }
@@ -126,32 +127,32 @@ pub fn write_gpt<D: Write + Seek>(dev: &mut D, disk_size: u64, parts: &[Part]) -
     let mut table = vec![0u8; 128 * 128];
     for (i, p) in parts.iter().enumerate() {
         let e = &mut table[i * 128..(i + 1) * 128];
-        e[0..16].copy_from_slice(&p.gpt_type);
-        e[16..32].copy_from_slice(&random_guid());
-        e[32..40].copy_from_slice(&(p.start / SECTOR).to_le_bytes());
-        e[40..48].copy_from_slice(&((p.start + p.size) / SECTOR - 1).to_le_bytes());
+        put(e, 0, &p.gpt_type);
+        put(e, 16, &random_guid());
+        put64(e, 32, p.start / SECTOR);
+        put64(e, 40, (p.start + p.size) / SECTOR - 1);
         for (j, c) in p.name.encode_utf16().take(36).enumerate() {
-            e[56 + j * 2..58 + j * 2].copy_from_slice(&c.to_le_bytes());
+            put(e, 56 + j * 2, &c.to_le_bytes());
         }
     }
     let table_crc = crc32fast::hash(&table);
     let disk_guid = random_guid();
     let header = |current: u64, backup: u64, entries: u64| {
         let mut h = [0u8; 512];
-        h[0..8].copy_from_slice(b"EFI PART");
-        h[8..12].copy_from_slice(&0x0001_0000u32.to_le_bytes());
-        h[12..16].copy_from_slice(&92u32.to_le_bytes());
-        h[24..32].copy_from_slice(&current.to_le_bytes());
-        h[32..40].copy_from_slice(&backup.to_le_bytes());
-        h[40..48].copy_from_slice(&34u64.to_le_bytes());
-        h[48..56].copy_from_slice(&(last - 33).to_le_bytes());
-        h[56..72].copy_from_slice(&disk_guid);
-        h[72..80].copy_from_slice(&entries.to_le_bytes());
-        h[80..84].copy_from_slice(&128u32.to_le_bytes());
-        h[84..88].copy_from_slice(&128u32.to_le_bytes());
-        h[88..92].copy_from_slice(&table_crc.to_le_bytes());
+        put(&mut h, 0, b"EFI PART");
+        put32(&mut h, 8, 0x0001_0000);
+        put32(&mut h, 12, 92);
+        put64(&mut h, 24, current);
+        put64(&mut h, 32, backup);
+        put64(&mut h, 40, 34);
+        put64(&mut h, 48, last - 33);
+        put(&mut h, 56, &disk_guid);
+        put64(&mut h, 72, entries);
+        put32(&mut h, 80, 128);
+        put32(&mut h, 84, 128);
+        put32(&mut h, 88, table_crc);
         let crc = crc32fast::hash(&h[..92]);
-        h[16..20].copy_from_slice(&crc.to_le_bytes());
+        put32(&mut h, 16, crc);
         h
     };
     dev.seek(SeekFrom::Start(SECTOR))?;

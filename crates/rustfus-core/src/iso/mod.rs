@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-#![allow(dead_code)]
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::{self, Read};
@@ -29,19 +28,6 @@ fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<usize> {
     return std::os::unix::fs::FileExt::read_at(f, buf, off);
     #[cfg(windows)]
     return std::os::windows::fs::FileExt::seek_read(f, buf, off);
-}
-
-fn read_exact_at(f: &File, buf: &mut [u8], mut off: u64) -> io::Result<()> {
-    let mut n = 0;
-    while n < buf.len() {
-        match read_at(f, &mut buf[n..], off) {
-            Ok(0) => return Err(bad("short read")),
-            Ok(k) => (n, off) = (n + k, off + k as u64),
-            Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
-            Err(e) => return Err(e),
-        }
-    }
-    Ok(())
 }
 
 #[derive(Default, Debug, Clone, Copy)]
@@ -116,7 +102,9 @@ struct Susp {
 fn boot_catalog(f: &File, lba: u32) -> ElTorito {
     let mut b = [0u8; 2048];
     let mut et = ElTorito::default();
-    if read_exact_at(f, &mut b, lba as u64 * BLK).is_err() || b[0] != 1 || b[30..32] != [0x55, 0xAA]
+    if crate::blockdev::read_at(f, &mut b, lba as u64 * BLK).is_err()
+        || b[0] != 1
+        || b[30..32] != [0x55, 0xAA]
     {
         return et;
     }
@@ -144,7 +132,7 @@ impl Iso {
         let mut vd = [0u8; 2048];
         let (mut pvd, mut joliet, mut boot) = (None, None, ElTorito::default());
         for s in 16..256 {
-            read_exact_at(&f, &mut vd, s * BLK)?;
+            crate::blockdev::read_at(&f, &mut vd, s * BLK)?;
             if &vd[1..6] != b"CD001" {
                 return Err(bad("not an ISO9660 image"));
             }
@@ -175,7 +163,7 @@ impl Iso {
             udf: None,
         };
         let mut sec = [0u8; 2048];
-        read_exact_at(&iso.f, &mut sec, root.0)?;
+        crate::blockdev::read_at(&iso.f, &mut sec, root.0)?;
         let dot = parse_rec(sec.get(..sec[0] as usize).unwrap_or(&[]))?;
         if iso.susp(dot.su)?.sp {
             iso.names = Names::Rr;
@@ -308,7 +296,7 @@ impl Iso {
                 return Err(bad("bad SUSP continuation"));
             }
             area = vec![0; len];
-            read_exact_at(&self.f, &mut area, off)?;
+            crate::blockdev::read_at(&self.f, &mut area, off)?;
         }
         s.name = name.map(|n| String::from_utf8_lossy(&n).into_owned());
         s.link = link;
@@ -333,7 +321,7 @@ impl Iso {
             return Err(bad("directory too large"));
         }
         let mut buf = vec![0; len as usize];
-        read_exact_at(&self.f, &mut buf, ext)?;
+        crate::blockdev::read_at(&self.f, &mut buf, ext)?;
         let (mut local, mut last_id, mut more) = (Vec::<Entry>::new(), &[][..], false);
         let mut pos = 0;
         while pos < buf.len() {
@@ -399,7 +387,7 @@ impl Iso {
             };
             if let Some(c) = s.child {
                 let mut sec = [0u8; 2048];
-                read_exact_at(&self.f, &mut sec, c)?;
+                crate::blockdev::read_at(&self.f, &mut sec, c)?;
                 let dot = parse_rec(sec.get(..sec[0] as usize).unwrap_or(&[]))?;
                 (e.is_dir, e.extents) = (true, vec![(c, dot.len)]);
             }
