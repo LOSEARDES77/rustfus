@@ -3,7 +3,20 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Windows To Go installs.
 
-use super::*;
+#[cfg(windows)]
+use super::layout::{fat_label, zero_range};
+use super::{Ctx, Job};
+#[cfg(windows)]
+use super::{Fs, MB, Scheme, e, open_dev, sanitize_label, unmount};
+#[cfg(windows)]
+use crate::blockdev::BlockDev;
+#[cfg(windows)]
+use crate::drives::run;
+#[cfg(windows)]
+use crate::{bootrec, fsos, part, wtg, wue};
+#[cfg(windows)]
+use std::io::Write;
+use std::path::Path;
 
 #[cfg(not(windows))]
 pub(super) fn write_wtg(_job: &Job, _img: &Path, _ctx: &Ctx) -> Result<String, String> {
@@ -14,7 +27,9 @@ pub(super) fn write_wtg(_job: &Job, _img: &Path, _ctx: &Ctx) -> Result<String, S
 /// edition from the mounted ISO, bcdboot makes it bootable.
 #[cfg(windows)]
 pub(super) fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, String> {
-    let index = job.wtg.unwrap();
+    let index = job
+        .wtg
+        .expect("write_wtg is only called for Windows To Go jobs");
     let gpt = job.scheme == Scheme::Gpt;
     let end = (job.drive.size - 34 * part::SECTOR) / MB * MB;
     let esp = 260 * MB;
@@ -23,7 +38,7 @@ pub(super) fn write_wtg(job: &Job, img: &Path, ctx: &Ctx) -> Result<String, Stri
         parts.push(part::Part {
             start: MB,
             size: esp,
-            mbr_type: 0xEF,
+            mbr_type: 0xef,
             gpt_type: part::GPT_ESP,
             name: "EFI System Partition",
             active: false,

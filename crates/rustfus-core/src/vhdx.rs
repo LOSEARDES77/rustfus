@@ -44,7 +44,8 @@ fn guid(s: &str) -> [u8; 16] {
     let hex: Vec<u8> = s.bytes().filter(|&c| c != b'-').collect();
     let mut g = [0u8; 16];
     for (i, b) in g.iter_mut().enumerate() {
-        *b = u8::from_str_radix(std::str::from_utf8(&hex[i * 2..i * 2 + 2]).unwrap(), 16).unwrap();
+        let pair = std::str::from_utf8(&hex[i * 2..i * 2 + 2]).expect("GUID constants are ASCII");
+        *b = u8::from_str_radix(pair, 16).expect("GUID constants are hex");
     }
     g[..4].reverse();
     g[4..6].reverse();
@@ -302,8 +303,10 @@ pub fn open_vhdx(mut f: File) -> io::Result<Sparse> {
 
 /// Dynamic VHD (disk type 3), given its footer.
 pub fn open_vhd_dynamic(mut f: File, footer: &[u8]) -> io::Result<Sparse> {
-    let be32 = |b: &[u8], o: usize| u32::from_be_bytes(b[o..o + 4].try_into().unwrap());
-    let be64 = |b: &[u8], o: usize| u64::from_be_bytes(b[o..o + 8].try_into().unwrap());
+    let be32 =
+        |b: &[u8], o: usize| u32::from_be_bytes(b[o..o + 4].try_into().expect("4-byte slice"));
+    let be64 =
+        |b: &[u8], o: usize| u64::from_be_bytes(b[o..o + 8].try_into().expect("8-byte slice"));
     let dh = read_at(&mut f, be64(footer, 16), 1024)
         .map_err(|_| invalid("VHD dynamic header is missing"))?;
     if &dh[..8] != b"cxsparse" {
@@ -333,12 +336,5 @@ pub fn open_vhd_dynamic(mut f: File, footer: &[u8]) -> io::Result<Sparse> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn crc32c_check_value() {
-        assert_eq!(crc32c(b"123456789"), 0xE306_9283);
-        assert_eq!(guid(BAT_GUID)[..4], [0x66, 0x77, 0xC2, 0x2D]);
-    }
-}
+#[path = "../tests/unit/vhdx.rs"]
+mod tests;

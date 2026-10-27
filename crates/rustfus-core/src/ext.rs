@@ -32,7 +32,7 @@ const CRC32C: [u32; 256] = {
         let mut k = 0;
         while k < 8 {
             c = if c & 1 != 0 {
-                (c >> 1) ^ 0x82F6_3B78
+                (c >> 1) ^ 0x82f6_3b78
             } else {
                 c >> 1
             };
@@ -47,7 +47,7 @@ const CRC32C: [u32; 256] = {
 /// Raw crc32c (no pre/post inversion), as ext4's checksums use it.
 pub(crate) fn crc32c(crc: u32, data: &[u8]) -> u32 {
     data.iter().fold(crc, |c, &b| {
-        CRC32C[((c ^ b as u32) & 0xFF) as usize] ^ (c >> 8)
+        CRC32C[((c ^ b as u32) & 0xff) as usize] ^ (c >> 8)
     })
 }
 
@@ -72,8 +72,8 @@ fn random16() -> [u8; 16] {
     let mut u = [0u8; 16];
     u[..8].copy_from_slice(&crate::part::random_u64().to_le_bytes());
     u[8..].copy_from_slice(&crate::part::random_u64().to_le_bytes());
-    u[6] = u[6] & 0x0F | 0x40;
-    u[8] = u[8] & 0x3F | 0x80;
+    u[6] = u[6] & 0x0f | 0x40;
+    u[8] = u[8] & 0x3f | 0x80;
     u
 }
 
@@ -166,7 +166,7 @@ impl Fs {
         }
         if self.ext4 {
             put16(&mut b, end + 4, 12);
-            b[end + 7] = 0xDE;
+            b[end + 7] = 0xde;
             let c = crc32c(self.ino_seed(dir), &b[..end]);
             put32(&mut b, end + 8, c);
         }
@@ -206,7 +206,7 @@ impl Fs {
                 }
             }
             let hdr = |buf: &mut [u8], n: usize, max: usize, depth: u16| {
-                put16(buf, 0, 0xF30A);
+                put16(buf, 0, 0xf30a);
                 put16(buf, 2, n as u16);
                 put16(buf, 4, max as u16);
                 put16(buf, 6, depth);
@@ -263,20 +263,20 @@ impl Fs {
         }
         put16(&mut r, 0, mode);
         put32(&mut r, 4, size as u32);
-        for at in [0x08, 0x0C, 0x10, 0x90] {
+        for at in [0x08, 0x0c, 0x10, 0x90] {
             put32(&mut r, at, self.now);
         }
-        put16(&mut r, 0x1A, links);
+        put16(&mut r, 0x1a, links);
         put32(
             &mut r,
-            0x1C,
+            0x1c,
             ((list.len() as u64 + meta) * self.bs / 512) as u32,
         );
-        put32(&mut r, 0x6C, (size >> 32) as u32);
+        put32(&mut r, 0x6c, (size >> 32) as u32);
         put16(&mut r, 0x80, 32); // i_extra_isize
         if self.ext4 {
             let c = crc32c(self.ino_seed(ino), &r);
-            put16(&mut r, 0x7C, c as u16);
+            put16(&mut r, 0x7c, c as u16);
             put16(&mut r, 0x82, (c >> 16) as u16);
         }
         Ok(r)
@@ -393,22 +393,22 @@ pub fn format<D: Write + Seek>(
         ents.push((12 + i as u32, 1, name.as_bytes()));
     }
     let root = fs.dir_block(2, &ents)?;
-    inodes.push((2, fs.inode(2, 0x41ED, 3, &root, bs)?));
+    inodes.push((2, fs.inode(2, 0x41ed, 3, &root, bs)?));
     let mut lpf = fs.dir_block(11, &[(11, 2, b"."), (2, 2, b"..")])?;
     for _ in 1..(16384 / bs).min(12) {
         lpf.extend(fs.dir_block(11, &[])?);
     }
-    inodes.push((11, fs.inode(11, 0x41C0, 2, &lpf, lpf.len() as u64)?));
+    inodes.push((11, fs.inode(11, 0x41c0, 2, &lpf, lpf.len() as u64)?));
     for (i, (_, data)) in files.iter().enumerate() {
         let ino = 12 + i as u32;
-        inodes.push((ino, fs.inode(ino, 0x81A4, 1, data, data.len() as u64)?));
+        inodes.push((ino, fs.inode(ino, 0x81a4, 1, data, data.len() as u64)?));
     }
     let mut sb = vec![0u8; 1024];
     if journal {
         let jlen = journal_blocks(blocks);
         let mut jsb = vec![0u8; bs as usize];
         for (at, v) in [
-            (0, 0xC03B_3998),
+            (0, 0xc03b_3998),
             (4, 4),
             (12, bs as u32),
             (16, jlen as u32),
@@ -421,16 +421,16 @@ pub fn format<D: Write + Seek>(
         jsb[48..64].copy_from_slice(&uuid);
         let j = fs.inode(8, 0x8180, 1, &jsb, jlen * bs)?;
         // Backup of the journal inode's block map, plus its size.
-        sb[0x10C..0x148].copy_from_slice(&j[0x28..0x64]);
+        sb[0x10c..0x148].copy_from_slice(&j[0x28..0x64]);
         sb[0x148..0x150].copy_from_slice(
-            &j[0x6C..0x70]
+            &j[0x6c..0x70]
                 .iter()
                 .chain(&j[4..8])
                 .copied()
                 .collect::<Vec<_>>(),
         );
-        put32(&mut sb, 0xE0, 8);
-        sb[0xFD] = 1;
+        put32(&mut sb, 0xe0, 8);
+        sb[0xfd] = 1;
         inodes.push((8, j));
     }
     let used_inodes = 11 + nfiles;
@@ -456,16 +456,16 @@ pub fn format<D: Write + Seek>(
         put32(d, 0, fs.bitmap(g) as u32);
         put32(d, 4, fs.bitmap(g) as u32 + 1);
         put32(d, 8, fs.bitmap(g) as u32 + 2);
-        put16(d, 0x0C, free as u16);
-        put16(d, 0x0E, (ipg - ui) as u16);
+        put16(d, 0x0c, free as u16);
+        put16(d, 0x0e, (ipg - ui) as u16);
         put16(d, 0x10, if g == 0 { 2 } else { 0 });
         if ext4 {
             put16(d, 0x12, if g == 0 { 4 } else { 1 }); // ITABLE_ZEROED / INODE_UNINIT
             put16(d, 0x18, crc32c(fs.seed, &bb) as u16);
-            put16(d, 0x1A, crc32c(fs.seed, &ib[..ipg as usize / 8]) as u16);
-            put16(d, 0x1C, (ipg - ui) as u16);
+            put16(d, 0x1a, crc32c(fs.seed, &ib[..ipg as usize / 8]) as u16);
+            put16(d, 0x1c, (ipg - ui) as u16);
             let c = crc32c(crc32c(fs.seed, &(g as u32).to_le_bytes()), d); // checksum field still zero
-            put16(d, 0x1E, c as u16);
+            put16(d, 0x1e, c as u16);
         }
     }
 
@@ -473,42 +473,42 @@ pub fn format<D: Write + Seek>(
         (0x00, ipg * groups),
         (0x04, blocks),
         (0x08, blocks / 20),
-        (0x0C, free_blocks),
+        (0x0c, free_blocks),
         (0x10, ipg * groups - used_inodes),
         (0x14, first),
         (0x18, bs.trailing_zeros() as u64 - 10),
-        (0x1C, bs.trailing_zeros() as u64 - 10),
+        (0x1c, bs.trailing_zeros() as u64 - 10),
         (0x20, bpg),
         (0x24, bpg),
         (0x28, ipg),
         (0x30, now as u64),
         (0x40, now as u64),
-        (0x4C, 1),
+        (0x4c, 1),
         (0x54, 11),
-        (0x5C, 0x28 | if journal { 4 } else { 0 }), // ext_attr, dir_index, has_journal
+        (0x5c, 0x28 | if journal { 4 } else { 0 }), // ext_attr, dir_index, has_journal
         (0x60, 2 | if ext4 { 0x40 } else { 0 }),    // filetype, extents
         (0x64, 3 | if ext4 { 0x468 } else { 0 }), // sparse_super, large_file (+ huge_file, dir_nlink, extra_isize, metadata_csum)
-        (0x100, 0x0C),                            // user_xattr, acl
+        (0x100, 0x0c),                            // user_xattr, acl
         (0x108, now as u64),
         (0x160, 1), // signed directory hash
     ] {
         put32(&mut sb, at, v as u32);
     }
     for (at, v) in [
-        (0x36, 0xFFFF),
-        (0x38, 0xEF53),
-        (0x3A, 1),
-        (0x3C, 1),
+        (0x36, 0xffff),
+        (0x38, 0xef53),
+        (0x3a, 1),
+        (0x3c, 1),
         (0x58, ISIZE as u16),
-        (0x15C, 32),
-        (0x15E, 32),
+        (0x15c, 32),
+        (0x15e, 32),
     ] {
         put16(&mut sb, at, v);
     }
     sb[0x68..0x78].copy_from_slice(&uuid);
     sb[0x78..0x78 + label.len()].copy_from_slice(label.as_bytes());
-    sb[0xEC..0xFC].copy_from_slice(&random16());
-    sb[0xFC] = 1; // half_md4
+    sb[0xec..0xfc].copy_from_slice(&random16());
+    sb[0xfc] = 1; // half_md4
     sb[0x175] = ext4 as u8; // crc32c
 
     let mut itable0 = vec![0u8; (fs.itb * bs) as usize];
@@ -533,10 +533,10 @@ pub fn format<D: Write + Seek>(
             buf.resize(1024, 0);
         }
         if has_sb(g) {
-            put16(&mut sb, 0x5A, g as u16);
+            put16(&mut sb, 0x5a, g as u16);
             if ext4 {
-                let c = crc32c(!0, &sb[..0x3FC]);
-                put32(&mut sb, 0x3FC, c);
+                let c = crc32c(!0, &sb[..0x3fc]);
+                put32(&mut sb, 0x3fc, c);
             }
             buf.extend_from_slice(&sb);
             buf.resize(buf.len().next_multiple_of(bs as usize), 0);
@@ -566,81 +566,5 @@ pub fn format<D: Write + Seek>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    #[test]
-    fn crc32c_check_value() {
-        assert_eq!(!crc32c(!0, b"123456789"), 0xE306_9283);
-    }
-
-    #[test]
-    fn superblock_in_memory() {
-        let mut c = io::Cursor::new(vec![0u8; 8 << 20]);
-        format(&mut c, 8 << 20, Kind::Ext4, "casper-rw", 0, &[]).unwrap();
-        let b = c.into_inner();
-        assert_eq!(&b[1080..1082], &[0x53, 0xEF]);
-        assert_eq!(&b[1024 + 0x78..1024 + 0x78 + 10], b"casper-rw\0");
-    }
-
-    #[test]
-    fn e2fsck_clean() {
-        let run = |cmd: &str, args: &[&str], img: &std::path::Path| {
-            let o = Command::new(cmd).args(args).arg(img).output().unwrap();
-            let text = String::from_utf8_lossy(&o.stdout).into_owned()
-                + &String::from_utf8_lossy(&o.stderr);
-            (o.status.success(), o.stdout, text)
-        };
-        if ["e2fsck", "dumpe2fs", "debugfs"]
-            .iter()
-            .any(|t| Command::new(t).arg("-V").output().is_err())
-        {
-            eprintln!("e2fsprogs not installed, skipping");
-            return;
-        }
-        let big: Vec<u8> = (0..300_000u32).map(|i| (i % 251) as u8).collect();
-        for kind in [Kind::Ext2, Kind::Ext3, Kind::Ext4] {
-            for (size, bs) in [(64u64 << 20, 1024), (300 << 20, 0), (2 << 30, 4096)] {
-                let path = std::env::temp_dir().join(format!(
-                    "rustfus-ext-{}-{kind:?}-{size}",
-                    std::process::id()
-                ));
-                let mut f = std::fs::OpenOptions::new()
-                    .read(true)
-                    .write(true)
-                    .create(true)
-                    .truncate(true)
-                    .open(&path)
-                    .unwrap();
-                f.set_len(size).unwrap();
-                format(
-                    &mut f,
-                    size,
-                    kind,
-                    "persistence",
-                    bs,
-                    &[("persistence.conf", b"/ union\n"), ("big.bin", &big)],
-                )
-                .unwrap();
-                drop(f);
-                let (ok, _, out) = run("e2fsck", &["-fn"], &path);
-                assert!(ok && !out.contains("Fix?"), "{kind:?} {size}: {out}");
-                let (_, _, out) = run("dumpe2fs", &["-h"], &path);
-                assert!(
-                    out.contains("Filesystem volume name:   persistence\n"),
-                    "{out}"
-                );
-                assert_eq!(
-                    run("debugfs", &["-R", "cat /persistence.conf"], &path).1,
-                    b"/ union\n"
-                );
-                assert!(
-                    run("debugfs", &["-R", "cat /big.bin"], &path).1 == big,
-                    "{kind:?} {size}: big.bin differs"
-                );
-                std::fs::remove_file(path).ok();
-            }
-        }
-    }
-}
+#[path = "../tests/unit/ext.rs"]
+mod tests;

@@ -6,10 +6,10 @@ pub(crate) fn get16(b: &[u8], at: usize) -> u16 {
     u16::from_le_bytes([b[at], b[at + 1]])
 }
 pub(crate) fn get32(b: &[u8], at: usize) -> u32 {
-    u32::from_le_bytes(b[at..at + 4].try_into().unwrap())
+    u32::from_le_bytes(b[at..at + 4].try_into().expect("4-byte slice"))
 }
 pub(crate) fn get64(b: &[u8], at: usize) -> u64 {
-    u64::from_le_bytes(b[at..at + 8].try_into().unwrap())
+    u64::from_le_bytes(b[at..at + 8].try_into().expect("8-byte slice"))
 }
 pub(crate) fn put(b: &mut [u8], at: usize, v: &[u8]) {
     b[at..at + v.len()].copy_from_slice(v);

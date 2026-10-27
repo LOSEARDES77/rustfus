@@ -236,7 +236,7 @@ pub(super) fn list(chosen: &[String]) -> Result<Vec<String>, String> {
         .ok_or("Invalid Windows edition")?
         .1;
     let uefi = v.page.starts_with("UEFI_SHELL");
-    let mut s = SESSION.lock().unwrap();
+    let mut s = SESSION.lock().expect("Fido session lock poisoned");
     let Some(want) = chosen.get(3) else {
         *s = Session::default();
         if uefi {
@@ -264,7 +264,7 @@ pub(super) fn list(chosen: &[String]) -> Result<Vec<String>, String> {
 
 /// Download URL from the links the arch list fetched.
 pub(super) fn url(chosen: &[String]) -> Result<String, String> {
-    let s = SESSION.lock().unwrap();
+    let s = SESSION.lock().expect("Fido session lock poisoned");
     s.links
         .iter()
         .find(|l| l.0 == chosen[4])
@@ -273,14 +273,5 @@ pub(super) fn url(chosen: &[String]) -> Result<String, String> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn makes_uuid() {
-        let u = uuid();
-        assert_eq!(u.len(), 36);
-        assert_eq!(u.as_bytes()[14], b'4');
-        assert_ne!(u, uuid());
-    }
-}
+#[path = "../../tests/unit/fido/native.rs"]
+mod tests;

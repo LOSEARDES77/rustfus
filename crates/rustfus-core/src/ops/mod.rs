@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-use crate::blockdev::{BlockDev, read_at, write_at};
+use crate::drives::Drive;
+#[cfg(not(windows))]
 use crate::drives::run;
-use crate::drives::{Drive, human};
 #[cfg(windows)]
-use crate::wtg;
-use crate::{bootrec, fsos, image, iso, part, syslinux, wue};
-use md5::{Digest, Md5};
+use crate::fsos;
+use crate::{image, iso, wue};
 use std::fs::{File, OpenOptions};
-use std::io::{self, Cursor, Read, Seek, SeekFrom, Write};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -19,14 +18,13 @@ mod files;
 mod format;
 mod layout;
 #[cfg(test)]
+#[path = "../../tests/unit/ops.rs"]
 mod tests;
 mod to_go;
 
-use dd::*;
-use files::*;
-use format::*;
-use layout::*;
-use to_go::*;
+use dd::write_dd;
+use format::write_fs;
+use to_go::write_wtg;
 
 pub enum Msg {
     Progress(f32, String),
@@ -98,8 +96,8 @@ impl Fs {
 
     fn mbr_type(self) -> u8 {
         match self {
-            Fs::Fat => 0x0E,
-            Fs::Fat32 => 0x0C,
+            Fs::Fat => 0x0e,
+            Fs::Fat32 => 0x0c,
             Fs::Ext2 | Fs::Ext3 | Fs::Ext4 => 0x83,
             _ => 0x07,
         }
@@ -134,7 +132,7 @@ impl Fs {
 
     pub fn max_label(self) -> usize {
         match self {
-            Fs::Fat | Fs::Fat32 => 11,
+            Fs::Fat | Fs::Fat32 | Fs::Exfat => 11,
             Fs::Ext2 | Fs::Ext3 | Fs::Ext4 => 16,
             _ => 32,
         }
@@ -253,7 +251,7 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
     File::open(path)
         .and_then(|mut f| f.read_exact(&mut head))
         .map_err(e)?;
-    let hybrid = head[510..] == [0x55, 0xAA] && (0..4).any(|i| head[446 + i * 16 + 4] != 0);
+    let hybrid = head[510..] == [0x55, 0xaa] && (0..4).any(|i| head[446 + i * 16 + 4] != 0);
     let Ok(iso) = iso::Iso::open(path) else {
         return Ok(Report {
             hybrid,
@@ -314,13 +312,29 @@ pub fn needs_grub_download(rep: &Report, scheme: Scheme, target: Target) -> bool
 }
 
 /// GRUB embeds "GNU GRUB  version X" in its modules, as Rufus' scan relies on.
+/// Newer builds store the printf format "GNU GRUB  version %s\0" instead, with
+/// the version as the next string, which is where Rufus reads it from.
 fn grub_version(module: &[u8]) -> Option<String> {
     let tag = b"GNU GRUB  version ";
-    let at = module.windows(tag.len()).position(|w| w == tag)? + tag.len();
-    let end = module[at..]
-        .iter()
-        .position(|&b| b == 0 || b.is_ascii_whitespace())?;
-    String::from_utf8(module[at..at + end].to_vec()).ok()
+    let token = |at: usize| {
+        let end = module[at..]
+            .iter()
+            .position(|&b| b == 0 || b.is_ascii_whitespace())?;
+        Some((&module[at..at + end], at + end))
+    };
+    let mut from = 0;
+    while let Some(p) = module[from..].windows(tag.len()).position(|w| w == tag) {
+        let at = from + p + tag.len();
+        let (mut v, end) = token(at)?;
+        if v == b"%s" {
+            v = token(end + 1)?.0;
+        }
+        if v.first().is_some_and(u8::is_ascii_digit) {
+            return String::from_utf8(v.to_vec()).ok();
+        }
+        from = at;
+    }
+    None
 }
 
 /// Keeps labels within the filesystem's limit and free of shell

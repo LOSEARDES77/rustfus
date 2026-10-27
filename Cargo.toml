@@ -5,9 +5,14 @@ resolver = "3"
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.95"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/LOSEARDES77/rustfus"
+homepage = "https://github.com/LOSEARDES77/rustfus"
+keywords = ["usb", "bootable", "iso", "rufus", "disk-image"]
+categories = ["command-line-utilities", "filesystem", "hardware-support"]
+# Distributed as GitHub release binaries, not on crates.io.
+publish = false
 
 [workspace.dependencies]
 rustfus-core = { path = "crates/rustfus-core" }

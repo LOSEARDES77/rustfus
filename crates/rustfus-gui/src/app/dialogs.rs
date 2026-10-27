@@ -3,7 +3,14 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! START confirmation steps, the Fido download dialog, and the Log/About/Settings windows.
 
-use super::*;
+use super::{App, Dialog};
+use crate::widgets::{ok_cancel, os_window, rufus_style};
+use eframe::egui::{self, Color32};
+use rustfus_core::loc::{t, tf};
+use rustfus_core::ops::Msg;
+use rustfus_core::{drives, fido, net};
+use std::path::PathBuf;
+use std::time::Duration;
 
 impl App {
     pub(super) fn dialogs(&mut self, ctx: &egui::Context) {

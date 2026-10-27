@@ -31,42 +31,56 @@ mod imp {
         Ok(())
     }
 
+    fn mkfs_tool(fs: Fs) -> Option<(&'static str, &'static str)> {
+        match fs {
+            Fs::Ntfs => Some(("mkfs.ntfs", "ntfs-3g or ntfsprogs")),
+            Fs::Exfat => Some(("mkfs.exfat", "exfatprogs")),
+            Fs::Udf => Some(("mkudffs", "udftools")),
+            Fs::Ext2 => Some(("mkfs.ext2", "e2fsprogs")),
+            Fs::Ext3 => Some(("mkfs.ext3", "e2fsprogs")),
+            Fs::Ext4 => Some(("mkfs.ext4", "e2fsprogs")),
+            _ => None,
+        }
+    }
+
+    /// The tool `mkfs` would run for `fs` when it isn't installed, checked
+    /// before the drive is touched.
+    pub fn missing_tool(fs: Fs) -> Option<String> {
+        let (tool, package) = mkfs_tool(fs)?;
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let found = std::env::split_paths(&path)
+            .chain(["/sbin".into(), "/usr/sbin".into()])
+            .any(|d| d.join(tool).is_file());
+        (!found).then(|| format!("{tool} (package {package})"))
+    }
+
     pub fn mkfs(d: &Drive, n: u32, fs: Fs, label: &str, cluster: u32) -> Result<(), String> {
         let node = partition(d, n);
         let c = cluster_arg(cluster);
         let mut args: Vec<&str> = Vec::new();
-        let tool = match fs {
+        let (tool, _) =
+            mkfs_tool(fs).ok_or_else(|| format!("{} is not supported on Linux", fs.name()))?;
+        match fs {
             Fs::Ntfs => {
                 args.extend(["-Q", "-F", "-L", label]);
                 if let Some(c) = &c {
                     args.extend(["-c", c]);
                 }
-                "mkfs.ntfs"
             }
             Fs::Exfat => {
                 args.extend(["-n", label]);
                 if let Some(c) = &c {
                     args.extend(["-c", c]);
                 }
-                "mkfs.exfat"
             }
-            Fs::Udf => {
-                args.extend(["--utf8", "--label", label]);
-                "mkudffs"
-            }
-            Fs::Ext2 | Fs::Ext3 | Fs::Ext4 => {
+            Fs::Udf => args.extend(["--utf8", "--label", label]),
+            _ => {
                 args.extend(["-F", "-L", label]);
                 if let Some(c) = &c {
                     args.extend(["-b", c]);
                 }
-                match fs {
-                    Fs::Ext2 => "mkfs.ext2",
-                    Fs::Ext3 => "mkfs.ext3",
-                    _ => "mkfs.ext4",
-                }
             }
-            _ => return Err(format!("{} is not supported on Linux", fs.name())),
-        };
+        }
         args.push(&node);
         run(tool, &args).map(|_| ())
     }
@@ -80,7 +94,17 @@ mod imp {
             run("mount", &["-t", "ntfs3", &node, &target])
                 .or_else(|_| run("ntfs-3g", &[&node, &target]))
         } else {
-            run("mount", &[&node, &target])
+            // Explicit type: right after mkfs the probe can miss a filesystem
+            // whose module isn't loaded yet (seen with exFAT).
+            let kind = match fs {
+                Fs::Exfat => "exfat",
+                Fs::Udf => "udf",
+                Fs::Ext2 => "ext2",
+                Fs::Ext3 => "ext3",
+                Fs::Ext4 => "ext4",
+                _ => "auto",
+            };
+            run("mount", &["-t", kind, &node, &target])
         };
         r.map(|_| dir)
     }
@@ -189,6 +213,12 @@ mod imp {
     pub fn unmount(_d: &Drive, _n: u32, _dir: &std::path::Path) -> Result<(), String> {
         Ok(())
     }
+}
+
+/// macOS and Windows format with built-in system tools.
+#[cfg(not(target_os = "linux"))]
+pub fn missing_tool(_fs: Fs) -> Option<String> {
+    None
 }
 
 pub use imp::*;

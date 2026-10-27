@@ -3,7 +3,10 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! UDF (ECMA-167 / OSTA UDF 1.02-2.60), read-only. 2048-byte blocks only.
 
-use super::*;
+use super::{BLK, ElTorito, Entry, ExtReader, Iso, Names, bad, boot_catalog, le32};
+use std::collections::HashSet;
+use std::fs::File;
+use std::io::{self, Read};
 
 /// Extent offset meaning "reads as zeros" (allocated-but-unrecorded / sparse extents).
 pub(super) const ZERO: u64 = u64::MAX;
@@ -14,8 +17,9 @@ pub(super) fn le16(b: &[u8], o: usize) -> u16 {
 }
 
 pub(super) fn le64(b: &[u8], o: usize) -> u64 {
-    b.get(o..o + 8)
-        .map_or(0, |s| u64::from_le_bytes(s.try_into().unwrap()))
+    b.get(o..o + 8).map_or(0, |s| {
+        u64::from_le_bytes(s.try_into().expect("8-byte slice"))
+    })
 }
 
 /// Checks a descriptor tag's identifier and header checksum.

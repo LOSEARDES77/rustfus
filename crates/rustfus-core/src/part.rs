@@ -9,23 +9,26 @@ use std::io::{self, Seek, SeekFrom, Write};
 pub const SECTOR: u64 = 512;
 
 pub const GPT_BASIC_DATA: [u8; 16] = guid(
-    0xEBD0A0A2,
-    0xB9E5,
+    0xebd0a0a2,
+    0xb9e5,
     0x4433,
-    [0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7],
+    [0x87, 0xc0, 0x68, 0xb6, 0xb7, 0x26, 0x99, 0xc7],
 );
 pub const GPT_ESP: [u8; 16] = guid(
-    0xC12A7328,
-    0xF81F,
-    0x11D2,
-    [0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B],
+    0xc12a7328,
+    0xf81f,
+    0x11d2,
+    [0xba, 0x4b, 0x00, 0xa0, 0xc9, 0x3e, 0xc9, 0x3b],
 );
 pub const GPT_LINUX: [u8; 16] = guid(
-    0x0FC63DAF,
+    0x0fc63daf,
     0x8483,
     0x4772,
-    [0x8E, 0x79, 0x3D, 0x69, 0xD8, 0x47, 0x7D, 0xE4],
+    [0x8e, 0x79, 0x3d, 0x69, 0xd8, 0x47, 0x7d, 0xe4],
 );
+
+/// GPT_BASIC_DATA_ATTRIBUTE_NO_DRIVE_LETTER
+const GPT_NO_DRIVE_LETTER: u64 = 1 << 63;
 
 /// GUIDs are stored mixed-endian: first three fields little endian.
 const fn guid(a: u32, b: u16, c: u16, d: [u8; 8]) -> [u8; 16] {
@@ -51,8 +54,8 @@ pub(crate) fn random_guid() -> [u8; 16] {
     let mut g = [0u8; 16];
     g[..8].copy_from_slice(&random_u64().to_le_bytes());
     g[8..].copy_from_slice(&random_u64().to_le_bytes());
-    g[7] = (g[7] & 0x0F) | 0x40; // version 4
-    g[8] = (g[8] & 0x3F) | 0x80;
+    g[7] = (g[7] & 0x0f) | 0x40; // version 4
+    g[8] = (g[8] & 0x3f) | 0x80;
     g
 }
 
@@ -70,11 +73,11 @@ fn chs(lba: u64) -> [u8; 3] {
     let (heads, spt) = (255u64, 63u64);
     let c = lba / (heads * spt);
     if c > 1023 {
-        return [0xFE, 0xFF, 0xFF];
+        return [0xfe, 0xff, 0xff];
     }
     let h = (lba / spt) % heads;
     let s = lba % spt + 1;
-    [h as u8, (s as u8) | ((c >> 2) as u8 & 0xC0), c as u8]
+    [h as u8, (s as u8) | ((c >> 2) as u8 & 0xc0), c as u8]
 }
 
 fn mbr_entry(e: &mut [u8], p: &Part) {
@@ -94,7 +97,7 @@ fn write_sector0<D: Write + Seek>(dev: &mut D, entries: &[Part]) -> io::Result<(
         mbr_entry(&mut s[446 + i * 16..462 + i * 16], p);
     }
     s[510] = 0x55;
-    s[511] = 0xAA;
+    s[511] = 0xaa;
     dev.seek(SeekFrom::Start(0))?;
     dev.write_all(&s)
 }
@@ -104,20 +107,29 @@ fn zero<D: Write + Seek>(dev: &mut D, at: u64, len: u64) -> io::Result<()> {
     dev.write_all(&vec![0u8; len as usize])
 }
 
+/// Zeroes the gap before the first partition (at least the 33 GPT sectors, at
+/// most 1 MiB), so stale signatures there, like an ISO9660 descriptor at 32
+/// KiB left by a hybrid ISO, don't make the whole disk look formatted.
+fn clear_gap<D: Write + Seek>(dev: &mut D, parts: &[Part]) -> io::Result<()> {
+    let first = parts.iter().map(|p| p.start).min().unwrap_or(u64::MAX);
+    zero(dev, SECTOR, first.clamp(34 * SECTOR, 1 << 20) - SECTOR)
+}
+
 /// Writes an MBR table (boot code left zeroed) and wipes stale GPT
 /// structures at both ends of the disk.
 pub fn write_mbr<D: Write + Seek>(dev: &mut D, disk_size: u64, parts: &[Part]) -> io::Result<()> {
-    zero(dev, SECTOR, 33 * SECTOR)?;
+    clear_gap(dev, parts)?;
     zero(dev, disk_size - 33 * SECTOR, 33 * SECTOR)?;
     write_sector0(dev, parts)
 }
 
 pub fn write_gpt<D: Write + Seek>(dev: &mut D, disk_size: u64, parts: &[Part]) -> io::Result<()> {
     let last = disk_size / SECTOR - 1;
+    clear_gap(dev, parts)?;
     let protective = Part {
         start: SECTOR,
         size: (disk_size - SECTOR).min(u32::MAX as u64 * SECTOR),
-        mbr_type: 0xEE,
+        mbr_type: 0xee,
         gpt_type: [0; 16],
         name: "",
         active: false,
@@ -131,6 +143,9 @@ pub fn write_gpt<D: Write + Seek>(dev: &mut D, disk_size: u64, parts: &[Part]) -
         put(e, 16, &random_guid());
         put64(e, 32, p.start / SECTOR);
         put64(e, 40, (p.start + p.size) / SECTOR - 1);
+        if p.name == "UEFI:NTFS" {
+            put64(e, 48, GPT_NO_DRIVE_LETTER);
+        }
         for (j, c) in p.name.encode_utf16().take(36).enumerate() {
             put(e, 56 + j * 2, &c.to_le_bytes());
         }
@@ -164,68 +179,5 @@ pub fn write_gpt<D: Write + Seek>(dev: &mut D, disk_size: u64, parts: &[Part]) -
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    fn layout(gpt: bool) -> Option<String> {
-        let path = std::env::temp_dir().join(format!("rustfus-part-{}-{gpt}", std::process::id()));
-        let size = 64 << 20;
-        let mut f = std::fs::File::create(&path).unwrap();
-        f.set_len(size).unwrap();
-        let parts = [
-            Part {
-                start: 1 << 20,
-                size: 32 << 20,
-                mbr_type: 0x0C,
-                gpt_type: GPT_BASIC_DATA,
-                name: "Main",
-                active: true,
-            },
-            Part {
-                start: 33 << 20,
-                size: 1 << 20,
-                mbr_type: 0xEF,
-                gpt_type: GPT_ESP,
-                name: "UEFI:NTFS",
-                active: false,
-            },
-        ];
-        if gpt {
-            write_gpt(&mut f, size, &parts)
-        } else {
-            write_mbr(&mut f, size, &parts)
-        }
-        .unwrap();
-        let out = Command::new("sfdisk").arg("-d").arg(&path).output().ok()?;
-        std::fs::remove_file(&path).ok();
-        out.status
-            .success()
-            .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
-    }
-
-    #[test]
-    fn sfdisk_reads_tables() {
-        let Some(mbr) = layout(false) else { return };
-        assert!(mbr.contains("label: dos"), "{mbr}");
-        assert!(
-            mbr.contains("start=        2048, size=       65536, type=c, bootable"),
-            "{mbr}"
-        );
-        assert!(
-            mbr.contains("start=       67584, size=        2048, type=ef"),
-            "{mbr}"
-        );
-        let gpt = layout(true).unwrap();
-        assert!(gpt.contains("label: gpt"), "{gpt}");
-        assert!(
-            gpt.contains("type=EBD0A0A2-B9E5-4433-87C0-68B6B72699C7"),
-            "{gpt}"
-        );
-        assert!(
-            gpt.contains("type=C12A7328-F81F-11D2-BA4B-00A0C93EC93B, uuid="),
-            "{gpt}"
-        );
-        assert!(gpt.contains("name=\"UEFI:NTFS\""), "{gpt}");
-    }
-}
+#[path = "../tests/unit/part.rs"]
+mod tests;

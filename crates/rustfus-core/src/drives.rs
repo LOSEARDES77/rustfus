@@ -52,8 +52,8 @@ pub fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
     Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
-/// Lists writable target disks. System disks are never returned; fixed
-/// (non-USB) disks only when `all` is set, like Rufus' "List USB Hard Drives".
+/// Lists writable target disks: USB, SD and MMC only. System and internal
+/// (SATA/NVMe) disks are never returned.
 pub fn list(all: bool) -> Result<Vec<Drive>, String> {
     imp::list(all)
 }
@@ -93,14 +93,19 @@ mod imp {
             || d.children.iter().flatten().any(hosts_system)
     }
 
-    pub fn list(all: bool) -> Result<Vec<Drive>, String> {
+    // USB hard drives already report TRAN=usb, and SATA/NVMe disks must never
+    // be offered, so `all` has nothing extra to add here.
+    pub fn list(_all: bool) -> Result<Vec<Drive>, String> {
         let json = run(
             "lsblk",
             &[
                 "-J",
                 "-b",
                 "-o",
-                "PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL",
+                // NAME keeps the output a tree: without it, newer lsblk
+                // (2.42) prints partitions flat, with no `children`, which
+                // hides the system mounts hosts_system() looks for.
+                "NAME,PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL",
             ],
         )?;
         let l: Lsblk = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -108,7 +113,7 @@ mod imp {
             .into_iter()
             .filter(|d| d.kind == "disk" && d.size.unwrap_or(0) > 0)
             .filter(|d| !d.path.starts_with("/dev/zram") && !hosts_system(d))
-            .filter(|d| all || d.rm || d.hotplug || d.tran.as_deref() == Some("usb"))
+            .filter(|d| d.rm || d.hotplug || d.tran.as_deref() == Some("usb"))
             .map(|d| {
                 let label = d
                     .label
@@ -177,7 +182,9 @@ mod imp {
         letter: Option<String>,
     }
 
-    pub fn list(all: bool) -> Result<Vec<Drive>, String> {
+    // BusType 7 already covers USB hard drives, and internal SATA/NVMe disks
+    // must never be offered, so `all` has nothing extra to add here.
+    pub fn list(_all: bool) -> Result<Vec<Drive>, String> {
         let json = run(
             "powershell",
             &[
@@ -193,7 +200,7 @@ mod imp {
         Ok(disks
             .into_iter()
             .filter(|d| !d.is_system && !d.is_boot && d.size > 0)
-            .filter(|d| all || matches!(d.bus_type, 7 | 12 | 13))
+            .filter(|d| matches!(d.bus_type, 7 | 12 | 13))
             .map(|d| {
                 let name = d
                     .label

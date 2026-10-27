@@ -1,0 +1,42 @@
+# Format, lint and test on every push and pull request.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+          targets: x86_64-pc-windows-gnu,aarch64-apple-darwin
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - name: Clippy (Linux, Windows, macOS)
+        run: |
+          for t in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu aarch64-apple-darwin; do
+            cargo clippy --locked --workspace --all-targets --target "$t" -- -D warnings
+          done
+      # Optional tools some tests use to check the written images.
+      - run: sudo apt-get update && sudo apt-get install -y xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
+      - run: cargo test --workspace --locked
+
+  # rust-version in Cargo.toml must keep building.
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@1.95
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --locked --workspace

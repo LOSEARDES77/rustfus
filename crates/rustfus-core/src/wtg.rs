@@ -34,13 +34,13 @@ pub fn editions(iso: &Iso) -> Result<Vec<(u32, String)>, String> {
         Ok(_) => Err("unexpected end of install.wim".to_string()),
         Err(e) => Err(e.to_string()),
     };
-    let mut hdr = [0u8; 0xD0];
+    let mut hdr = [0u8; 0xd0];
     read(0, &mut hdr)?;
     if &hdr[..8] != b"MSWIM\0\0\0" {
         return Err("install.wim is not a WIM file".into());
     }
     // XML data resource header at 0x48: 7-byte size + flags, then offset.
-    let size = get64(&hdr, 0x48) & 0x00FF_FFFF_FFFF_FFFF;
+    let size = get64(&hdr, 0x48) & 0x00ff_ffff_ffff_ffff;
     let offset = get64(&hdr, 0x50);
     if size == 0 || size > 64 << 20 {
         return Err("WIM XML metadata missing or too large".into());
@@ -73,20 +73,5 @@ fn parse_editions(utf16: &[u8]) -> Vec<(u32, String)> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_wim_xml() {
-        let xml = "\u{feff}<WIM><TOTALBYTES>1</TOTALBYTES><IMAGE INDEX=\"1\"><NAME>Windows 11 Home</NAME></IMAGE>\
-                   <IMAGE INDEX=\"6\"><NAME>Windows 11 Pro</NAME><DISPLAYNAME>Windows 11 Pro (display)</DISPLAYNAME></IMAGE></WIM>";
-        let bytes: Vec<u8> = xml.encode_utf16().flat_map(|u| u.to_le_bytes()).collect();
-        assert_eq!(
-            parse_editions(&bytes),
-            vec![
-                (1, "Windows 11 Home".into()),
-                (6, "Windows 11 Pro (display)".into())
-            ]
-        );
-    }
-}
+#[path = "../tests/unit/wtg.rs"]
+mod tests;

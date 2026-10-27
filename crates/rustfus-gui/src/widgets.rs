@@ -7,7 +7,7 @@ use eframe::egui::{self, Color32, RichText};
 use rustfus_core::image;
 use rustfus_core::loc::{t, tf};
 
-pub(crate) const RUFUS_GREEN: Color32 = Color32::from_rgb(0x06, 0xB0, 0x25);
+pub(crate) const RUFUS_GREEN: Color32 = Color32::from_rgb(0x06, 0xb0, 0x25);
 
 /// Rufus look: taller, bordered controls and roomier rows.
 pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {

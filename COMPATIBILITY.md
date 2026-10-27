@@ -31,7 +31,7 @@ builds compile cleanly but have not been run on those systems.
 | ISOHybrid ISO/DD prompt | 🟢 | 🟢 | 🟢 | |
 | Windows install USB, FAT32 (UEFI + BIOS) | 🟢 | 🟢 | 🟢 | own FAT32 formatter + ms-sys boot code |
 | Windows install USB, NTFS + UEFI:NTFS (>4 GB files) | 🟡 | 🟢 | 🔴 | Linux needs `mkfs.ntfs`; macOS can't write NTFS |
-| Windows install USB, exFAT + UEFI:NTFS | 🟡 | 🟢 | 🟢 | Linux needs `mkfs.exfat` |
+| Windows install USB, exFAT | 🔴 | 🔴 | 🔴 | refused: UEFI:NTFS loads bootmgfw.efi, but Windows Boot Manager can't read the BCD from exFAT (0xc0000272) |
 | Windows User Experience (unattend.xml) | 🟢 | 🟢 | 🟢 | |
 | Windows To Go | 🔴 | 🟡 | 🔴 | DISM + bcdboot; untested |
 | Linux ISO, UEFI boot | 🟢 | 🟢 | 🟢 | |

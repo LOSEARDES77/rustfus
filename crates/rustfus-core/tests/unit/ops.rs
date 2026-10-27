@@ -1,9 +1,19 @@
+use super::dd::{copy, verify_dev};
+use super::files::{patch_label, patch_persistence};
+use super::format::write_fat;
+use super::layout::{layout, write_tables};
 use super::*;
+use crate::{bootrec, syslinux};
+use std::io::Cursor;
 
 #[test]
 fn label_is_sanitized() {
     assert_eq!(sanitize_label("my'; rm -rf", Fs::Ntfs), "my rm -rf");
     assert_eq!(sanitize_label("abcdefghijklmn", Fs::Fat32), "ABCDEFGHIJK");
+    assert_eq!(
+        sanitize_label("CCCOMA_X64FRE_ES-ES_DV9", Fs::Exfat),
+        "CCCOMA_X64F"
+    );
     assert_eq!(sanitize_label("$()", Fs::Exfat), "USB");
 }
 
@@ -14,13 +24,66 @@ fn grub_version_is_found() {
         Some("2.12")
     );
     assert_eq!(grub_version(b"nothing here"), None);
+    assert_eq!(
+        grub_version(b"\0GNU GRUB  version %s\x002.14-2ubuntu1\0").as_deref(),
+        Some("2.14-2ubuntu1")
+    );
 }
 
 #[test]
 fn persistence_patch_is_idempotent() {
-    let once = patch_persistence("linux /casper/vmlinuz boot=casper quiet");
+    let once = patch_persistence("linux /casper/vmlinuz boot=casper quiet").unwrap();
     assert_eq!(once, "linux /casper/vmlinuz boot=casper persistent quiet");
-    assert_eq!(patch_persistence(&once), once);
+    assert_eq!(patch_persistence(&once), None);
+    // Ubuntu 23.04+: no boot=casper, no preseed.
+    let grub = "linux  /casper/vmlinuz  --- quiet splash\ninitrd /casper/initrd\n";
+    let once = patch_persistence(grub).unwrap();
+    assert_eq!(
+        once,
+        "linux  /casper/vmlinuz persistent  --- quiet splash\ninitrd /casper/initrd\n"
+    );
+    assert_eq!(patch_persistence(&once), None);
+    assert_eq!(
+        patch_persistence("linux /casper/vmlinuz file=/cdrom/preseed/ubuntu.seed quiet").as_deref(),
+        Some("linux /casper/vmlinuz persistent file=/cdrom/preseed/ubuntu.seed quiet")
+    );
+    assert_eq!(
+        patch_persistence("append boot=live components").as_deref(),
+        Some("append boot=live persistence components")
+    );
+    assert_eq!(patch_persistence("menuentry 'Memtest'"), None);
+}
+
+#[test]
+fn label_patch_targets_kernel_lines() {
+    let grub =
+        "search --label 'Fedora 40'\n\tlinux /vmlinuz root=live:CDLABEL=Fedora\\x2040 quiet\n";
+    assert_eq!(
+        patch_label("EFI/BOOT/grub.cfg", grub, "Fedora 40", "FEDORA 40").as_deref(),
+        Some(
+            "search --label 'Fedora 40'\n\tlinux /vmlinuz root=live:CDLABEL=FEDORA\\x2040 quiet\n"
+        )
+    );
+    let isolinux = "label linux\n  append initrd=i.img coreos.liveiso=fedora-coreos-44 rw\n";
+    assert_eq!(
+        patch_label(
+            "isolinux/isolinux.cfg",
+            isolinux,
+            "fedora-coreos-44",
+            "FEDORA-CORE"
+        )
+        .as_deref(),
+        Some("label linux\n  append initrd=i.img coreos.liveiso=FEDORA-CORE rw\n")
+    );
+    let entry = "options root=live:CDLABEL=ARCH_2026\n";
+    assert_eq!(
+        patch_label("loader/entries/a.conf", entry, "ARCH_2026", "ARCH_2026"),
+        None
+    );
+    assert_eq!(
+        patch_label("README.txt", isolinux, "fedora-coreos-44", "X"),
+        None
+    );
 }
 
 fn ctx_parts() -> (Sender<Msg>, AtomicBool) {
@@ -230,7 +293,7 @@ fn iso_mode_to_fat32_image() {
     write_fat(&job, &rep, Some(&iso), None, &parts[0], &dev, &ctx).unwrap();
 
     let raw = std::fs::read(&devp).unwrap();
-    assert_eq!(&raw[510..512], &[0x55, 0xAA]);
+    assert_eq!(&raw[510..512], &[0x55, 0xaa]);
     assert_eq!(raw[446], 0x80);
     let part_img = dir.join("part.img");
     std::fs::write(

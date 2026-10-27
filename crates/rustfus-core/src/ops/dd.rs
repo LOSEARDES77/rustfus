@@ -3,7 +3,14 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! DD-mode writes: raw image copy to the device and read-back verification.
 
-use super::*;
+use super::{CHUNK, Ctx, SECTOR, e, open_dev, raw_path, unmount};
+use crate::blockdev::{read_at, write_at};
+use crate::drives::{Drive, human};
+use crate::image;
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
+use std::sync::atomic::Ordering;
 
 pub(super) fn read_full(r: &mut dyn Read, buf: &mut [u8]) -> Result<usize, String> {
     let mut n = 0;

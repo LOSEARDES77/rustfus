@@ -38,6 +38,8 @@ fn attach_console() {
     unsafe extern "system" {
         fn AttachConsole(pid: u32) -> i32;
     }
+    // SAFETY: AttachConsole takes a plain integer and has no memory-safety
+    // preconditions; it fails harmlessly when there is no parent console.
     unsafe {
         AttachConsole(ATTACH_PARENT_PROCESS);
     }

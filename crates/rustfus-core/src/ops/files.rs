@@ -3,7 +3,12 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Copying the image tree and Rustfus' extras onto the new filesystem.
 
-use super::*;
+use super::{AUTORUN_ICO, Boot, Ctx, FREEDOS, Job, MB, MD5_LOADERS, Report, e, sanitize_label};
+use crate::{image, iso, wue};
+use md5::{Digest, Md5};
+use std::fs::File;
+use std::io::{self, Cursor, Read, Write};
+use std::path::PathBuf;
 
 /// Where files land: Rustfus' own FAT driver, or a mounted OS filesystem.
 pub(super) enum Dest<'a, T: fatfs::ReadWriteSeek> {
@@ -44,12 +49,63 @@ pub(super) fn is_boot_cfg(p: &str) -> bool {
         && (p.starts_with("boot/grub") || p.starts_with("isolinux") || p.starts_with("syslinux"))
 }
 
-/// Adds the persistence kernel option, as Rufus does for casper/live ISOs.
-pub(super) fn patch_persistence(cfg: &str) -> String {
-    cfg.replace("boot=casper persistent", "boot=casper")
-        .replace("boot=live persistence", "boot=live")
-        .replace("boot=casper", "boot=casper persistent")
-        .replace("boot=live", "boot=live persistence")
+/// Adds the persistence kernel option with Rufus' rules, first match wins:
+/// older Ubuntu's preseed, Mint's `boot=casper`, Ubuntu 23.04+'s bare
+/// `/casper/vmlinuz`, then Debian's `boot=live`. None when nothing changed.
+pub(super) fn patch_persistence(cfg: &str) -> Option<String> {
+    const RULES: [(&str, &str); 4] = [
+        ("file=/cdrom/preseed", "persistent file=/cdrom/preseed"),
+        ("boot=casper", "boot=casper persistent"),
+        ("/casper/vmlinuz ", "/casper/vmlinuz persistent "),
+        ("boot=live", "boot=live persistence"),
+    ];
+    let (from, to) = RULES.iter().find(|(from, _)| cfg.contains(from))?;
+    // Undo an earlier patch first so a second run changes nothing.
+    let s = cfg.replace(to, from).replace(from, to);
+    (s != cfg).then_some(s)
+}
+
+/// Replaces the ISO label with the USB one on kernel command lines, as Rufus'
+/// fix_config does, since the new filesystem can't keep the ISO label
+/// (`root=live:CDLABEL=`, `coreos.liveiso=`, ...). `path` picks the keyword:
+/// `linux` in grub.cfg, `options` in .conf (systemd-boot), `append` otherwise.
+pub(super) fn patch_label(
+    path: &str,
+    cfg: &str,
+    iso_label: &str,
+    usb_label: &str,
+) -> Option<String> {
+    let lower = path.to_ascii_lowercase();
+    let keys: &[&str] = if lower.ends_with("grub.cfg") {
+        &["linux", "linuxefi", "$linux"]
+    } else if lower.ends_with(".conf") {
+        &["options"]
+    } else if lower.ends_with(".cfg") {
+        &["append"]
+    } else {
+        return None;
+    };
+    let (from, to) = (
+        iso_label.replace(' ', "\\x20"),
+        usb_label.replace(' ', "\\x20"),
+    );
+    if from.is_empty() || from == to || !cfg.contains(&from) {
+        return None;
+    }
+    let mut changed = false;
+    let out: Vec<String> = cfg
+        .split_inclusive('\n')
+        .map(|line| {
+            let first = line.split_whitespace().next().unwrap_or("");
+            if keys.iter().any(|k| first.eq_ignore_ascii_case(k)) && line.contains(&from) {
+                changed = true;
+                line.replace(&from, &to)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+    changed.then(|| out.concat())
 }
 
 /// Copies the ISO tree plus Rufus' extras (validation loaders, unattend,
@@ -91,11 +147,25 @@ pub(super) fn copy_files<T: fatfs::ReadWriteSeek>(
             path = format!("{}_original.efi", &path[..path.len() - 4]);
         }
         let mut reader: Box<dyn Read> = Box::new(iso.reader(entry).map_err(e)?);
-        if job.persistence > 0 && is_boot_cfg(&path) && entry.size < MB {
+        if (lower.ends_with(".cfg") || lower.ends_with(".conf")) && entry.size < MB {
             let mut s = String::new();
             if reader.read_to_string(&mut s).is_ok() {
-                ctx.log(format!("Patched {path} for persistence"));
-                reader = Box::new(Cursor::new(patch_persistence(&s).into_bytes()));
+                let usb_label = sanitize_label(&job.label, job.fs);
+                if let Some(p) = patch_label(&path, &s, &iso.volume_id(), &usb_label) {
+                    ctx.log(format!(
+                        "Patched {path}: '{}' → '{usb_label}'",
+                        iso.volume_id()
+                    ));
+                    s = p;
+                }
+                if job.persistence > 0
+                    && is_boot_cfg(&path)
+                    && let Some(p) = patch_persistence(&s)
+                {
+                    ctx.log(format!("Patched {path} for persistence"));
+                    s = p;
+                }
+                reader = Box::new(Cursor::new(s.into_bytes()));
             } else {
                 reader = Box::new(iso.reader(entry).map_err(e)?);
             }

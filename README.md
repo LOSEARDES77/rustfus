@@ -7,6 +7,12 @@ Formatting Utility, with an [egui](https://github.com/emilk/egui) interface
 that mirrors the original. Its purpose is to bring the Rufus tool to
 platforms where it doesn't run: **Linux and macOS**, as well as Windows.
 
+## Why
+
+I love Rufus, and I wanted a way to run it on Linux specifically. Every time
+I needed it, I ended up spinning up a Windows VM just to make a bootable USB.
+Rustfus saves me from doing that.
+
 > **This project was vibe coded.** It was written with an AI coding assistant
 > (Claude Code), using the Rufus source code as the reference. It has
 > automated tests, but it has **not yet been tested on physical USB drives**,
@@ -39,7 +45,7 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for what works on each OS.
 
 ## Building
 
-Requires Rust 1.88 or newer (edition 2024).
+Requires Rust 1.95 or newer (edition 2024).
 
 ```sh
 cargo build --release
@@ -103,6 +109,9 @@ cargo test --workspace                # unit and disk-image tests
 cargo test --workspace -- --ignored   # also network tests against rufus.ie
 ```
 
+Unit tests live in each crate's `tests/unit/`, mirroring `src/`; each module
+includes its file with `#[path]`, so tests can reach private functions.
+
 Some tests use `xorriso`, `fsck.vfat`, `e2fsprogs`, `sfdisk` or `qemu-img`
 when available and skip themselves otherwise.
 
@@ -122,6 +131,19 @@ The release contains the files listed under [Installing](#installing),
 source of every GPL binary embedded from `res/` (listed in
 [res/SOURCES.txt](res/SOURCES.txt)). Tags with a hyphen (`v0.2.0-beta1`) are
 published as pre-releases.
+
+## Contributing
+
+Code follows the [Google Rust Style Guide](https://google.github.io/styleguide/rustguide.html).
+Before sending a pull request, run what CI runs:
+
+```sh
+cargo fmt --all --check
+cargo clippy --workspace --all-targets -- -D warnings
+cargo test --workspace
+```
+
+Changes are recorded in [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

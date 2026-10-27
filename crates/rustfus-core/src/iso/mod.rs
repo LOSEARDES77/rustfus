@@ -7,10 +7,11 @@ use std::io::{self, Read};
 use std::path::Path;
 
 #[cfg(test)]
+#[path = "../../tests/unit/iso.rs"]
 mod tests;
 mod udf;
 
-use udf::*;
+use udf::{Udf, ZERO};
 
 const BLK: u64 = 2048;
 
@@ -19,8 +20,9 @@ fn bad(msg: &str) -> io::Error {
 }
 
 fn le32(b: &[u8], o: usize) -> u32 {
-    b.get(o..o + 4)
-        .map_or(0, |s| u32::from_le_bytes(s.try_into().unwrap()))
+    b.get(o..o + 4).map_or(0, |s| {
+        u32::from_le_bytes(s.try_into().expect("4-byte slice"))
+    })
 }
 
 fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<usize> {
@@ -104,7 +106,7 @@ fn boot_catalog(f: &File, lba: u32) -> ElTorito {
     let mut et = ElTorito::default();
     if crate::blockdev::read_at(f, &mut b, lba as u64 * BLK).is_err()
         || b[0] != 1
-        || b[30..32] != [0x55, 0xAA]
+        || b[30..32] != [0x55, 0xaa]
     {
         return et;
     }
@@ -121,10 +123,12 @@ fn boot_catalog(f: &File, lba: u32) -> ElTorito {
 }
 
 impl Iso {
-    /// ISO9660 when it has a usable PVD/root, else UDF (UDF-only images, or bridge images with a broken ISO side).
+    /// UDF when present, else ISO9660, like Rufus. UDF goes first because
+    /// UDF/ISO9660 bridge images such as Windows ISOs only put a README stub
+    /// on the ISO9660 side.
     pub fn open(path: &Path) -> io::Result<Iso> {
         let f = File::open(path)?;
-        Self::open_iso9660(f.try_clone()?).or_else(|e| Self::open_udf(f).map_err(|_| e))
+        Self::open_udf(f.try_clone()?).or_else(|_| Self::open_iso9660(f))
     }
 
     fn open_iso9660(f: File) -> io::Result<Iso> {

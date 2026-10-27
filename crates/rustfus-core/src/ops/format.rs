@@ -3,7 +3,15 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! ISO mode / plain format onto FAT, ext or an OS-created filesystem.
 
-use super::*;
+use super::files::{Dest, DirDest, copy_files};
+use super::layout::{ext_kind, fat_label, layout, write_tables, zero_range};
+use super::{
+    Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze, e, open_dev, sanitize_label, unmount,
+};
+use crate::blockdev::BlockDev;
+use crate::{bootrec, fsos, iso, part, syslinux};
+use std::fs::File;
+use std::io::{Seek, SeekFrom, Write};
 
 /// FAT/FAT32 path: Rustfus formats and fills the partition itself.
 pub(super) fn write_fat(
@@ -67,6 +75,20 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     }
     if !fs.supported() {
         return Err(format!("{} cannot be created on this OS", fs.name()));
+    }
+    // UEFI:NTFS can load bootmgfw.efi from exFAT, but the Windows boot manager
+    // then reads the BCD with its own drivers, which lack exFAT (0xc0000272).
+    if fs == Fs::Exfat && rep.windows {
+        return Err("Windows install media can't boot from exFAT. Use NTFS.".into());
+    }
+    // Ext is formatted by Rustfus itself; the others need the OS tool.
+    if ext_kind(fs).is_none()
+        && let Some(tool) = fsos::missing_tool(fs)
+    {
+        return Err(format!(
+            "Formatting {} needs {tool}, which is not installed",
+            fs.name()
+        ));
     }
     let label = sanitize_label(&job.label, fs);
     // Like Rufus: Syslinux only for FAT, non-Windows, BIOS-capable targets.

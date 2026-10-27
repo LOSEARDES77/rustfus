@@ -115,7 +115,7 @@ impl<'a> BlockDev<'a> {
             };
             self.cache.insert(idx, b);
         }
-        Ok(self.cache.get_mut(&idx).unwrap())
+        Ok(self.cache.get_mut(&idx).expect("block was just inserted"))
     }
 
     fn write_back(&mut self) -> io::Result<()> {
@@ -127,7 +127,10 @@ impl<'a> BlockDev<'a> {
             .collect();
         dirty.sort();
         for idx in dirty {
-            let mut b = self.cache.remove(&idx).unwrap();
+            let mut b = self
+                .cache
+                .remove(&idx)
+                .expect("dirty index comes from the cache");
             let n = b.valid.len();
             self.fill(idx, &mut b, 0..n)?;
             write_at(self.file, &b.data, self.base + idx * BLOCK as u64)?;
@@ -156,7 +159,9 @@ impl<'a> BlockDev<'a> {
         if !(off + n).is_multiple_of(SECTOR) {
             self.fill(idx, blk, sectors.end - 1..sectors.end)?;
         }
-        sectors.for_each(|s| blk.valid[s] = true);
+        for s in sectors {
+            blk.valid[s] = true;
+        }
         blk.dirty = true;
         Ok(())
     }
@@ -176,7 +181,10 @@ impl<'a> BlockDev<'a> {
             let off = (self.pos % BLOCK as u64) as usize;
             let n = (len - done).min(self.block_len(idx) - off);
             self.block(idx)?;
-            let mut blk = self.cache.remove(&idx).unwrap();
+            let mut blk = self
+                .cache
+                .remove(&idx)
+                .expect("block() just cached this index");
             let r = self.prepare(idx, &mut blk, off, n, write);
             if r.is_ok() {
                 f(&mut blk, off, done, n);
@@ -242,39 +250,5 @@ impl Drop for BlockDev<'_> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn unaligned_io_round_trips() {
-        let path = std::env::temp_dir().join(format!("rustfus-bd-{}", std::process::id()));
-        std::fs::write(&path, vec![0xAAu8; 3 * BLOCK]).unwrap();
-        let f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&path)
-            .unwrap();
-        {
-            let mut d = BlockDev::new(&f, 4096, 2 * BLOCK as u64);
-            d.seek(SeekFrom::Start(BLOCK as u64 - 3)).unwrap();
-            d.write_all(b"hello").unwrap();
-            let big: Vec<u8> = (0..BLOCK + 100).map(|i| i as u8).collect();
-            d.seek(SeekFrom::Start(700)).unwrap();
-            d.write_all(&big[..BLOCK - 800]).unwrap();
-            assert!(d.write_all(&[0; 1]).is_ok());
-            d.seek(SeekFrom::End(0)).unwrap();
-            assert!(d.write_all(&[0; 1]).is_err());
-            d.flush().unwrap();
-            let mut back = [0u8; 5];
-            d.seek(SeekFrom::Start(BLOCK as u64 - 3)).unwrap();
-            d.read_exact(&mut back).unwrap();
-            assert_eq!(&back, b"hello");
-        }
-        let raw = std::fs::read(&path).unwrap();
-        assert!(raw[..4096 + 700].iter().all(|&b| b == 0xAA));
-        assert_eq!(raw[4096 + 700], 0);
-        assert_eq!(&raw[4096 + BLOCK - 3..4096 + BLOCK + 2], b"hello");
-        assert!(raw[4096 + 2 * BLOCK..].iter().all(|&b| b == 0xAA));
-        std::fs::remove_file(path).ok();
-    }
-}
+#[path = "../tests/unit/blockdev.rs"]
+mod tests;

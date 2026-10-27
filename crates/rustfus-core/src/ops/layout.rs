@@ -3,7 +3,13 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Partition layout, partition tables and boot records.
 
-use super::*;
+use super::{
+    Boot, CHUNK, Ctx, Fs, GRUB2_CORE, GRUB2_VERSION, Job, MB, Report, Scheme, Target, UEFI_NTFS, e,
+};
+use crate::blockdev::{BlockDev, write_at};
+use crate::{bootrec, part, syslinux};
+use std::fs::File;
+use std::io::{Seek, SeekFrom, Write};
 
 /// core.img matching the image's GRUB, fetched (signed) from rufus.ie like
 /// Rufus does, trimming the version at '.'/'-' until the server has it.
@@ -48,8 +54,10 @@ pub(super) fn layout(job: &Job, uefi_ntfs: bool) -> Vec<part::Part> {
         extra.push(part::Part {
             start: end,
             size,
-            mbr_type: 0xEF,
-            gpt_type: part::GPT_ESP,
+            mbr_type: 0xef,
+            // Like Rufus: never a GPT ESP, or Windows Setup picks it as the
+            // system partition and fails copying boot files (0x80070070).
+            gpt_type: part::GPT_BASIC_DATA,
             name: "UEFI:NTFS",
             active: false,
         });
@@ -106,7 +114,9 @@ pub(super) fn ext_kind(fs: Fs) -> Option<crate::ext::Kind> {
 }
 
 pub(super) fn fat_label(label: &str) -> [u8; 11] {
-    format!("{label:<11}").as_bytes()[..11].try_into().unwrap()
+    format!("{label:<11}").as_bytes()[..11]
+        .try_into()
+        .expect("11-byte slice")
 }
 
 pub(super) fn zero_range(

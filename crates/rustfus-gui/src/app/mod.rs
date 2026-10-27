@@ -6,12 +6,12 @@
 mod dialogs;
 mod sections;
 
-use crate::widgets::*;
-use eframe::egui::{self, Color32, RichText};
+use crate::widgets::{add_script_fonts, rufus_style};
+use eframe::egui::{self};
 use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Boot, Fs, Job, Msg, Report, Scheme, Target};
-use rustfus_core::{drives, fido, image, iso, loc, net, ops, wtg, wue};
+use rustfus_core::{drives, fido, image, iso, loc, ops, wtg, wue};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

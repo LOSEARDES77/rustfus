@@ -84,7 +84,7 @@ pub fn format<D: Write + Seek>(
     let fatsz = (total - reserved - root_sectors).div_ceil(tmp2);
     let clusters = (total - reserved - 2 * fatsz - root_sectors) / spc;
     let ok = if fat32 {
-        (65525..0x0FFF_FFF5).contains(&clusters)
+        (65525..0x0fff_fff5).contains(&clusters)
     } else {
         (4085..65525).contains(&clusters)
     };
@@ -98,11 +98,11 @@ pub fn format<D: Write + Seek>(
     let volid = crate::part::random_u64() as u32;
 
     let mut bs = vec![0u8; 3 * BPS as usize];
-    bs[..3].copy_from_slice(&[0xEB, if fat32 { 0x58 } else { 0x3C }, 0x90]);
+    bs[..3].copy_from_slice(&[0xeb, if fat32 { 0x58 } else { 0x3c }, 0x90]);
     bs[3..11].copy_from_slice(b"MSWIN4.1");
-    put16(&mut bs, 0x0B, BPS as u16);
-    bs[0x0D] = spc as u8;
-    put16(&mut bs, 0x0E, reserved as u16);
+    put16(&mut bs, 0x0b, BPS as u16);
+    bs[0x0d] = spc as u8;
+    put16(&mut bs, 0x0e, reserved as u16);
     bs[0x10] = 2;
     put16(&mut bs, 0x11, if fat32 { 0 } else { 512 });
     if total < 0x10000 {
@@ -110,13 +110,13 @@ pub fn format<D: Write + Seek>(
     } else {
         put32(&mut bs, 0x20, total as u32);
     }
-    bs[0x15] = 0xF8;
+    bs[0x15] = 0xf8;
     put16(&mut bs, 0x18, 63);
-    put16(&mut bs, 0x1A, 255);
-    put32(&mut bs, 0x1C, hidden);
+    put16(&mut bs, 0x1a, 255);
+    put32(&mut bs, 0x1c, hidden);
     let ext = if fat32 {
         put32(&mut bs, 0x24, fatsz as u32);
-        put32(&mut bs, 0x2C, 2);
+        put32(&mut bs, 0x2c, 2);
         put16(&mut bs, 0x30, 1);
         put16(&mut bs, 0x32, 6);
         0x40
@@ -129,15 +129,15 @@ pub fn format<D: Write + Seek>(
     put32(&mut bs, ext + 3, volid);
     bs[ext + 7..ext + 18].copy_from_slice(&label);
     bs[ext + 18..ext + 26].copy_from_slice(if fat32 { b"FAT32   " } else { b"FAT16   " });
-    bs[0x1FE..0x200].copy_from_slice(&[0x55, 0xAA]);
+    bs[0x1fe..0x200].copy_from_slice(&[0x55, 0xaa]);
     if fat32 {
-        bs[0x5FE..0x600].copy_from_slice(&[0x55, 0xAA]);
+        bs[0x5fe..0x600].copy_from_slice(&[0x55, 0xaa]);
         // FSInfo sector
         put32(&mut bs, 0x200, 0x4161_5252);
-        put32(&mut bs, 0x3E4, 0x6141_7272);
-        put32(&mut bs, 0x3E8, clusters as u32 - 1);
-        put32(&mut bs, 0x3EC, 3);
-        put32(&mut bs, 0x3FC, 0xAA55_0000);
+        put32(&mut bs, 0x3e4, 0x6141_7272);
+        put32(&mut bs, 0x3e8, clusters as u32 - 1);
+        put32(&mut bs, 0x3ec, 3);
+        put32(&mut bs, 0x3fc, 0xaa55_0000);
     }
 
     let data = (reserved + 2 * fatsz + root_sectors) * BPS;
@@ -150,13 +150,13 @@ pub fn format<D: Write + Seek>(
     }
     let mut fat = [0u8; 12];
     let n = if fat32 {
-        put32(&mut fat, 0, 0x0FFF_FFF8);
-        put32(&mut fat, 4, 0x0FFF_FFFF);
-        put32(&mut fat, 8, 0x0FFF_FFFF);
+        put32(&mut fat, 0, 0x0fff_fff8);
+        put32(&mut fat, 4, 0x0fff_ffff);
+        put32(&mut fat, 8, 0x0fff_ffff);
         12
     } else {
-        put16(&mut fat, 0, 0xFFF8);
-        put16(&mut fat, 2, 0xFFFF);
+        put16(&mut fat, 0, 0xfff8);
+        put16(&mut fat, 2, 0xffff);
         4
     };
     for i in 0..2 {
@@ -188,7 +188,7 @@ impl Layout {
         let mut b = [0u8; 512];
         dev.seek(SeekFrom::Start(0))?;
         dev.read_exact(&mut b)?;
-        let (spc, reserved) = (b[0x0D] as u64, get16(&b, 0x0E) as u64);
+        let (spc, reserved) = (b[0x0d] as u64, get16(&b, 0x0e) as u64);
         let fat32 = get16(&b, 0x16) == 0;
         let fatsz = if fat32 {
             get32(&b, 0x24) as u64
@@ -203,7 +203,7 @@ impl Layout {
             fat_start,
             root_start,
             data_start: root_start + root_sectors * BPS,
-            root_cluster: if fat32 { get32(&b, 0x2C) as u64 } else { 0 },
+            root_cluster: if fat32 { get32(&b, 0x2c) as u64 } else { 0 },
             fat32,
         })
     }
@@ -215,14 +215,14 @@ impl Layout {
     fn next<D: Read + Seek>(&self, dev: &mut D, c: u64) -> io::Result<Option<u64>> {
         let mut b = [0u8; 4];
         let (n, eoc) = if self.fat32 {
-            (4, 0x0FFF_FFF8)
+            (4, 0x0fff_fff8)
         } else {
-            (2, 0xFFF8)
+            (2, 0xfff8)
         };
         dev.seek(SeekFrom::Start(self.fat_start + c * n as u64))?;
         dev.read_exact(&mut b[..n])?;
         let v = if self.fat32 {
-            (get32(&b, 0) & 0x0FFF_FFFF) as u64
+            (get32(&b, 0) & 0x0fff_ffff) as u64
         } else {
             get16(&b, 0) as u64
         };
@@ -286,14 +286,14 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
         if dir != root {
             let first = &raw[..128];
             let slot = |name: &[u8; 11]| {
-                (0..4).find(|i| &first[i * 32..i * 32 + 11] == name && first[i * 32 + 11] != 0x0F)
+                (0..4).find(|i| &first[i * 32..i * 32 + 11] == name && first[i * 32 + 11] != 0x0f)
             };
             if let (Some(d), Some(dd)) = (slot(DOT), slot(DOTDOT)) {
                 let mut fixed = first.to_vec();
                 for i in 0..4 {
-                    let is_lfn = first[i * 32 + 11] == 0x0F;
+                    let is_lfn = first[i * 32 + 11] == 0x0f;
                     if is_lfn || i == d || i == dd {
-                        fixed[i * 32] = 0xE5;
+                        fixed[i * 32] = 0xe5;
                     }
                 }
                 let (mut de, mut dde) = (
@@ -312,9 +312,9 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
             if e[0] == 0 {
                 break;
             }
-            if e[0] == 0xE5
+            if e[0] == 0xe5
                 || e[0] == b'.'
-                || e[11] == 0x0F
+                || e[11] == 0x0f
                 || e[11] & 0x08 != 0
                 || e[11] & 0x10 == 0
             {
@@ -361,7 +361,7 @@ pub fn root_file<D: Read + Seek>(
         if e[0] == 0 {
             break;
         }
-        if e[0] == 0xE5 || e[11] == 0x0F || e[11] & 0x18 != 0 || &e[..11] != name {
+        if e[0] == 0xe5 || e[11] == 0x0f || e[11] & 0x18 != 0 || &e[..11] != name {
             continue;
         }
         let at = i * 32;
@@ -380,79 +380,5 @@ pub fn root_file<D: Read + Seek>(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::process::Command;
-
-    fn check(fat32: bool, size: u64) {
-        let path = std::env::temp_dir().join(format!("rustfus-fat-{}-{fat32}", std::process::id()));
-        let mut f = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&path)
-            .unwrap();
-        f.set_len(size).unwrap();
-        format(&mut f, size, fat32, 0, *b"TESTLABEL  ", 2048).unwrap();
-        {
-            let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
-            fs.root_dir()
-                .create_file("bootmgr")
-                .unwrap()
-                .write_all(&vec![7u8; 300_000])
-                .unwrap();
-            fs.root_dir().create_dir("EFI").unwrap();
-            fs.root_dir().create_dir("EFI/BOOT").unwrap();
-            fs.root_dir()
-                .create_file("EFI/BOOT/BOOTX64.EFI")
-                .unwrap()
-                .write_all(b"loader")
-                .unwrap();
-            fs.unmount().unwrap();
-        }
-        fix_dot_entries(&mut f).unwrap();
-        {
-            let fs = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
-            let mut v = Vec::new();
-            fs.root_dir()
-                .open_file("bootmgr")
-                .unwrap()
-                .read_to_end(&mut v)
-                .unwrap();
-            assert_eq!(v, vec![7u8; 300_000]);
-            assert_eq!(fs.volume_label().trim(), "TESTLABEL");
-        }
-        let mut bs = [0u8; 512];
-        f.seek(SeekFrom::Start(0)).unwrap();
-        f.read_exact(&mut bs).unwrap();
-        if fat32 {
-            assert_eq!(get16(&bs, 0x0E), 32);
-        }
-        assert_eq!(get32(&bs, 0x1C), 2048);
-        if let Ok(out) = Command::new("fsck.vfat").arg("-n").arg(&path).output() {
-            let text = String::from_utf8_lossy(&out.stdout);
-            assert!(
-                out.status.success() && !text.contains("Expected") && !text.contains("Bad"),
-                "{text}"
-            );
-        }
-        std::fs::remove_file(path).ok();
-    }
-
-    #[test]
-    fn fat32_formats_and_passes_fsck() {
-        check(true, 100 << 20);
-    }
-
-    #[test]
-    fn fat16_formats_and_passes_fsck() {
-        check(false, 200 << 20);
-    }
-
-    #[test]
-    fn fat32_rejects_tiny_volume() {
-        let mut c = io::Cursor::new(vec![0u8; 8 << 20]);
-        assert!(format(&mut c, 8 << 20, true, 4096, [b' '; 11], 0).is_err());
-    }
-}
+#[path = "../tests/unit/fat.rs"]
+mod tests;

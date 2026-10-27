@@ -3,7 +3,13 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! The main window: drive properties, format options and status sections.
 
-use super::*;
+use super::{App, BootSel, Dialog, FidoState, MB};
+use crate::widgets::{RUFUS_GREEN, bad_block_mode, cluster_name, combo, section, toggle};
+use eframe::egui::{self, Color32, RichText};
+use rustfus_core::loc::{t, tf};
+use rustfus_core::ops::{Fs, Scheme, Target};
+use rustfus_core::{image, loc, ops};
+use std::sync::atomic::Ordering;
 
 impl App {
     pub(super) fn drive_section(&mut self, ui: &mut egui::Ui) {
@@ -81,7 +87,7 @@ impl App {
             }
             let check = RichText::new("✔")
                 .size(16.0)
-                .color(Color32::from_rgb(0x1E, 0x7F, 0xD8));
+                .color(Color32::from_rgb(0x1e, 0x7f, 0xd8));
             let hash = ui.add_enabled(self.image_mode(), egui::Button::new(check).frame(false));
             if hash.on_hover_text(t("MSG_314")).clicked() {
                 self.compute_hashes(ui.ctx());
