@@ -3,11 +3,12 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! START confirmation steps, the Fido download dialog, and the Log/About/Settings windows.
 
-use super::{App, Dialog};
+use super::{App, Dialog, rustfus_name};
 use crate::widgets::{ok_cancel, os_window, rufus_style};
 use eframe::egui::{self, Color32};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::Msg;
+use rustfus_core::update::{Interval, Version};
 use rustfus_core::{drives, fido, net};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -26,6 +27,7 @@ impl App {
         let mut download: Option<(String, PathBuf)> = None;
         let mut stage = None;
         let mut start = false;
+        let mut allow_updates = None;
         match &mut self.dialog {
             Dialog::None => {}
             Dialog::Download => {
@@ -247,6 +249,44 @@ impl App {
                     ctx.request_repaint_after(Duration::from_millis(200));
                 }
             }
+            Dialog::UpdatePolicy => {
+                modal("update_policy", &mut |ui| {
+                    ui.heading(rustfus_name(&t("MSG_004")));
+                    ui.label(rustfus_name(&t("MSG_005")));
+                    ui.horizontal(|ui| {
+                        if ui.button(t("MSG_008")).clicked() {
+                            allow_updates = Some(true);
+                        }
+                        if ui.button(t("MSG_009")).clicked() {
+                            allow_updates = Some(false);
+                        }
+                    });
+                });
+            }
+            Dialog::NewVersion(r) => {
+                modal("new_version", &mut |ui| {
+                    ui.heading(rustfus_name(&t("IDD_NEW_VERSION")));
+                    ui.label(t("IDS_NEW_VERSION_AVAIL_TXT"));
+                    ui.label(format!("Rustfus {} → {}", Version::current(), r.version));
+                    ui.hyperlink_to(t("IDC_WEBSITE"), &r.url);
+                    if !r.notes.trim().is_empty() {
+                        ui.strong(t("IDS_NEW_VERSION_NOTES_GRP"));
+                        egui::ScrollArea::vertical()
+                            .id_salt("release_notes")
+                            .max_height(200.0)
+                            .show(ui, |ui| ui.label(r.notes.trim()));
+                    }
+                    ui.horizontal(|ui| {
+                        if ui.button(t("IDC_DOWNLOAD")).clicked() {
+                            ui.ctx().open_url(egui::OpenUrl::new_tab(&r.url));
+                            next = Some(Dialog::None);
+                        }
+                        if ui.button(t("IDCANCEL")).clicked() {
+                            next = Some(Dialog::None);
+                        }
+                    });
+                });
+            }
             Dialog::Error(msg) => {
                 let msg = msg.clone();
                 modal("error", &mut |ui| {
@@ -263,6 +303,19 @@ impl App {
         }
         if let Some(st) = stage {
             self.dialog = self.next_dialog(st);
+        }
+        if let Some(allow) = allow_updates {
+            self.dialog = Dialog::None;
+            if !allow {
+                self.update.interval = Interval::Disabled;
+            }
+            if let Err(err) = self.update.save() {
+                self.log
+                    .push(format!("Could not save the update settings: {err}"));
+            }
+            if allow {
+                self.check_updates(ctx, /* manual= */ false);
+            }
         }
         if let Some((url, path)) = download {
             self.log.push(format!("Downloading {url}"));
@@ -330,19 +383,65 @@ impl App {
             },
         );
         let mut dark = self.dark;
+        let mut policy = self.update.clone();
+        let (checking, note) = (self.update_rx.is_some(), &self.update_note);
+        let mut check_now = false;
         os_window(
             ctx,
             "settings",
             &mut self.show_settings,
-            &t("IDS_UPDATE_SETTINGS_GRP"),
-            [260.0, 60.0],
+            &t("IDD_UPDATE_POLICY"),
+            [320.0, 150.0],
             |ui| {
                 ui.checkbox(&mut dark, "Dark mode");
+                ui.separator();
+                egui::Grid::new("update_policy")
+                    .num_columns(2)
+                    .show(ui, |ui| {
+                        ui.label(t("IDS_UPDATE_FREQUENCY_TXT"));
+                        let name = |i: Interval| {
+                            if i == Interval::default() {
+                                tf("MSG_030", &[&t(i.loc_id())])
+                            } else {
+                                t(i.loc_id())
+                            }
+                        };
+                        egui::ComboBox::from_id_salt("update_interval")
+                            .selected_text(name(policy.interval))
+                            .show_ui(ui, |ui| {
+                                for i in Interval::ALL {
+                                    ui.selectable_value(&mut policy.interval, i, name(i));
+                                }
+                            });
+                        ui.end_row();
+                        ui.label(t("IDS_INCLUDE_BETAS_TXT"));
+                        ui.checkbox(&mut policy.include_betas, "");
+                        ui.end_row();
+                    });
+                ui.horizontal(|ui| {
+                    check_now = ui
+                        .add_enabled(!checking, egui::Button::new(t("IDC_CHECK_NOW")))
+                        .clicked();
+                    if checking {
+                        ui.spinner();
+                    }
+                    ui.label(note);
+                });
             },
         );
         if dark != self.dark {
             self.dark = dark;
             rufus_style(ctx, dark);
+        }
+        if policy != self.update {
+            self.update = policy;
+            if let Err(err) = self.update.save() {
+                self.log
+                    .push(format!("Could not save the update settings: {err}"));
+            }
+        }
+        if check_now {
+            self.check_updates(ctx, /* manual= */ true);
         }
     }
 }

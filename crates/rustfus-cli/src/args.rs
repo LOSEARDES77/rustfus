@@ -44,6 +44,12 @@ pub enum Cmd {
     },
     /// Download an official Windows ISO (or the UEFI Shell), like Rufus' Fido
     Download(DownloadArgs),
+    /// Check GitHub for a newer Rustfus release
+    CheckUpdate {
+        /// Include beta versions (pre-releases)
+        #[arg(long)]
+        betas: bool,
+    },
 }
 
 #[derive(Args)]

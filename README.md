@@ -40,6 +40,7 @@ behaviour goes to Rufus.
 - Windows ISO download through Fido
 - Save drives to `.img`, `.vhd` or `.vhdx`
 - 38 languages, taken from Rufus' translations
+- Update check against GitHub releases, with Rufus' update policy settings
 
 See [COMPATIBILITY.md](COMPATIBILITY.md) for what works on each OS.
 
@@ -76,6 +77,7 @@ sudo rustfus save -d /dev/sdX backup.vhd       # save a drive to an image
 rustfus download --win "Windows 11" --lang Spanish  # official Windows ISO
 rustfus download --win "Windows 11" --list     # list the choices for the next option
 rustfus hash ubuntu.iso
+rustfus check-update                           # newer release on GitHub? (--betas includes pre-releases)
 ```
 
 `rustfus <command> --help` lists every option (partition scheme, target, cluster
@@ -130,7 +132,8 @@ The release contains the files listed under [Installing](#installing),
 `SHA256SUMS.txt`, and a `*-third-party-sources.tar` with the upstream
 source of every GPL binary embedded from `res/` (listed in
 [res/SOURCES.txt](res/SOURCES.txt)). Tags with a hyphen (`v0.2.0-beta1`) are
-published as pre-releases.
+published as pre-releases; the update check only offers them to users who
+enabled "Include beta versions".
 
 ## Contributing
 
