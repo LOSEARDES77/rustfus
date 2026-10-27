@@ -239,6 +239,16 @@ fn write(a: WriteArgs) -> Result<(), String> {
             report.grub2_version
         );
     }
+    // Like Rufus, which cancels when the download is declined: there's no loader to fall back to.
+    if iso_mode
+        && !a.allow_downloads
+        && let Some(sl) = ops::syslinux_download(&report, fs, scheme, target)
+    {
+        return Err(format!(
+            "The image uses Syslinux {}{}, whose ldlinux.sys and ldlinux.bss must be downloaded; add --allow-downloads",
+            sl.version, sl.ext
+        ));
+    }
     let old_c32: &[String] = if iso_mode {
         ops::obsolete_c32(&report, fs, scheme, target)
     } else {

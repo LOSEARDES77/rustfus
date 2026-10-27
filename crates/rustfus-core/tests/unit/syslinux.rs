@@ -7,6 +7,7 @@ use std::process::Command;
 fn versions_of_embedded_loaders() {
     assert_eq!(embedded(false), (0x407, "/2013-07-25".into()));
     assert_eq!(embedded(true), (0x604, "/pre1".into()));
+    assert_eq!(embedded_version(), "6.04/pre1");
     let mut buf = vec![0u8; 300];
     buf[100..].copy_from_slice(
         &b"ISOLINUX 6.03 6.03-pre20* \0"
@@ -60,7 +61,7 @@ fn check_install(major: u8) {
         ..super::info(v, ext)
     };
     f.seek(SeekFrom::Start(12345)).unwrap();
-    install(&mut f, &info, &|_| {}).unwrap();
+    install(&mut f, &info, /* allow_download= */ false, &|_| {}).unwrap();
     assert_eq!(f.stream_position().unwrap(), 0);
 
     let (sys, bss) = if major >= 5 {
@@ -247,9 +248,33 @@ fn old_c32_kept_unless_approved() {
 #[ignore]
 fn download_6_03() {
     let info = super::info(0x603, "/2014-10-06".into());
-    let (sys, bss) = loader(&info, &|m| eprintln!("{m}")).unwrap();
+    let (sys, bss) = loader(
+        &info,
+        /* allow_download= */ true,
+        &|m| eprintln!("{m}"),
+    )
+    .unwrap();
     assert_eq!(sl_version(&sys).unwrap().0, 0x603);
     assert_eq!(bss.len(), 512);
+}
+
+/// Without permission, nothing is downloaded: a loader no cache can hold is
+/// refused, and one only differing in its extra version falls back to embedded.
+#[test]
+fn loader_download_needs_permission() {
+    assert!(!needs_download(&super::info(0x407, String::new())));
+    let (v, ext) = embedded(true);
+    assert!(!needs_download(&super::info(v, ext)));
+
+    let unknown = super::info(0x563, String::new());
+    assert!(needs_download(&unknown));
+    let err = loader(&unknown, /* allow_download= */ false, &|_| {}).unwrap_err();
+    assert!(err.contains("not allowed"), "{err}");
+
+    let other_ext = super::info(v, "/rustfus-test".into());
+    assert!(needs_download(&other_ext));
+    let (sys, _) = loader(&other_ext, /* allow_download= */ false, &|_| {}).unwrap();
+    assert_eq!(sys, V6_SYS);
 }
 
 fn ntfs_bootsect() -> [u8; 512] {
@@ -284,7 +309,7 @@ fn install_staged_on_ntfs() {
         cfg_path: "/boot/isolinux/isolinux.cfg".into(),
         ..super::info(v, ext)
     };
-    let (img, bss) = padded_loader(&info, &|_| {}).unwrap();
+    let (img, bss) = padded_loader(&info, /* allow_download= */ false, &|_| {}).unwrap();
     let n = ldlinux_sectors(&img) as u64;
     // Two runs, the second before the first, like a fragmented NTFS file.
     let sectors: Vec<u64> = (0..n)

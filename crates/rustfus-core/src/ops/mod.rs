@@ -185,6 +185,8 @@ pub struct Report {
     pub grub2_version: String,
     /// Obsolete menu.c32/vesamenu.c32 of a Syslinux < 5 image (ISO paths).
     pub old_c32: Vec<String>,
+    /// Syslinux the image boots with, never set for Windows images.
+    pub syslinux: Option<syslinux::Info>,
     pub large_file: bool,
     pub hybrid: bool,
     pub casper: bool,
@@ -282,17 +284,20 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
         .unwrap_or_default();
     let windows = has("sources/install.wim") || has("sources/install.esd") || has("bootmgr");
     // Syslinux is never installed for Windows images; extra_files only replaces c32 for v4.
-    let old_c32 = if windows {
-        Vec::new()
+    let sl = if windows {
+        None
     } else {
         syslinux::detect(&iso)
-            .filter(|sl| sl.major < 5)
-            .map(|sl| sl.old_c32)
-            .unwrap_or_default()
     };
+    let old_c32 = sl
+        .as_ref()
+        .filter(|sl| sl.major < 5)
+        .map(|sl| sl.old_c32.clone())
+        .unwrap_or_default();
     Ok(Report {
         grub2_version,
         old_c32,
+        syslinux: sl,
         is_iso: true,
         label: iso.volume_id(),
         windows,
@@ -335,6 +340,22 @@ pub fn obsolete_c32(rep: &Report, fs: Fs, scheme: Scheme, target: Target) -> &[S
     } else {
         &[]
     }
+}
+
+/// The image's Syslinux when a write with these settings would install it and
+/// need ldlinux.sys/ldlinux.bss downloaded (Rufus' "Download required" prompt).
+pub fn syslinux_download(
+    rep: &Report,
+    fs: Fs,
+    scheme: Scheme,
+    target: Target,
+) -> Option<&syslinux::Info> {
+    let sl = rep
+        .syslinux
+        .as_ref()
+        .filter(|sl| syslinux::needs_download(sl))?;
+    let installed = format::syslinux_for(rep, fs, scheme, target, Some(sl.clone()));
+    matches!(installed, Ok(Some(_))).then_some(sl)
 }
 
 /// GRUB embeds "GNU GRUB  version X" in its modules, as Rufus' scan relies on.
