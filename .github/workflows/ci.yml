@@ -1,10 +1,16 @@
 # Format, lint and test on every push and pull request.
 name: CI
 
+# Changes that can't affect the build (docs, license, release workflow) skip CI.
 on:
   push:
     branches: [main]
+    paths-ignore: &no-ci-paths
+      - "**.md"
+      - "LICENSE"
+      - ".github/workflows/release.yml"
   pull_request:
+    paths-ignore: *no-ci-paths
 
 permissions:
   contents: read
