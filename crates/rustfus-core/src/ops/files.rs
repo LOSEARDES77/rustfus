@@ -4,7 +4,7 @@
 //! Copying the image tree and Rustfus' extras onto the new filesystem.
 
 use super::{AUTORUN_ICO, Boot, Ctx, FREEDOS, Job, MB, MD5_LOADERS, Report, e, sanitize_label};
-use crate::{image, iso, wue};
+use crate::{image, iso, syslinux, wue};
 use md5::{Digest, Md5};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Write};
@@ -123,6 +123,13 @@ pub(super) fn copy_files<T: fatfs::ReadWriteSeek>(
     };
     let total = entries.iter().map(|x| x.size).sum::<u64>().max(1);
     let (mut done, mut md5sums, mut loaders) = (0u64, String::new(), Vec::new());
+    let find = |p: &str| {
+        entries
+            .iter()
+            .find(|x| !x.is_dir && x.path.eq_ignore_ascii_case(p))
+            .map(|x| x.path.clone())
+    };
+    let mut redirects = Vec::new();
     let mut buf = vec![0u8; 1 << 20];
     for entry in &entries {
         ctx.check()?;
@@ -132,7 +139,13 @@ pub(super) fn copy_files<T: fatfs::ReadWriteSeek>(
             continue;
         }
         if let Some(target) = entry.symlink() {
-            ctx.log(format!("Skipping symlink {} -> {target}", entry.path));
+            match syslinux::knoppix_redirects(&entry.path, target, find) {
+                Some(cfgs) => {
+                    ctx.log(format!("Found symlink {} -> {target}", entry.path));
+                    redirects.push((entry.path.as_str(), cfgs));
+                }
+                None => ctx.log(format!("Skipping symlink {} -> {target}", entry.path)),
+            }
             continue;
         }
         let iso = src.expect("entries come from an ISO");
@@ -189,6 +202,17 @@ pub(super) fn copy_files<T: fatfs::ReadWriteSeek>(
     }
 
     let has = |p: &str| entries.iter().any(|x| x.path.eq_ignore_ascii_case(p));
+    // Rufus only applies the Knoppix workaround to Syslinux images.
+    if !redirects.is_empty() && src.and_then(syslinux::detect).is_some() {
+        for (dir, cfgs) in redirects {
+            dest.mkdir(dir).map_err(|err| format!("{dir}: {err}"))?;
+            for (path, data) in cfgs {
+                dest.put(&path, &data)
+                    .map_err(|err| format!("{path}: {err}"))?;
+                ctx.log(format!("Created: {path}"));
+            }
+        }
+    }
     for (path, loader) in loaders {
         dest.put(&path, loader).map_err(e)?;
     }
