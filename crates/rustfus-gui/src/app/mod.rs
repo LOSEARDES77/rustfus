@@ -31,6 +31,9 @@ enum BootSel {
 enum Dialog {
     None,
     Download,
+    /// Rufus' "Download required" for a Syslinux 5+ loader Rustfus doesn't
+    /// embed: the image's version ("6.03/2014-10-06").
+    SyslinuxDownload(String),
     /// Rufus' "Replace menu.c32?": index into the image's obsolete c32 files.
     ReplaceC32(usize),
     Edition,
@@ -314,6 +317,13 @@ impl App {
         let iso = self.image_mode() && r.is_iso;
         if stage < 1 && iso && ops::needs_grub_download(r, self.scheme, self.target) {
             return Dialog::Download;
+        }
+        // Syslinux 5+ (download) and < 5 (obsolete c32) are exclusive, so they share a stage.
+        if stage < 2
+            && iso
+            && let Some(sl) = ops::syslinux_download(r, self.fs, self.scheme, self.target)
+        {
+            return Dialog::SyslinuxDownload(format!("{}{}", sl.version, sl.ext));
         }
         if stage < 2 && iso && !self.obsolete_c32().is_empty() {
             return Dialog::ReplaceC32(0);

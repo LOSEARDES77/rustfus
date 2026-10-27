@@ -259,7 +259,7 @@ fn syslinux_filesystem_gating() {
             reactos: None,
             old_c32: Vec::new(),
         };
-        syslinux_for(job, rep, Some(sl)).map(|s| s.is_some())
+        syslinux_for(rep, job.fs, job.scheme, job.target, Some(sl)).map(|s| s.is_some())
     };
 
     assert_eq!(installs(&job, &rep, 4), Ok(true));
@@ -285,6 +285,34 @@ fn syslinux_filesystem_gating() {
     job.target = Target::Bios;
     job.fs = Fs::Ext4;
     assert_eq!(installs(&job, &rep, 6), Ok(false));
+}
+
+/// The ldlinux.sys download is only asked for when Syslinux would be installed.
+#[test]
+fn syslinux_download_only_when_installed() {
+    let sl = syslinux::Info {
+        major: 5,
+        minor: 99,
+        version: "5.99".into(),
+        ext: String::new(),
+        cfg_path: "/isolinux/isolinux.cfg".into(),
+        overwrite_cfg: false,
+        reactos: None,
+        old_c32: Vec::new(),
+    };
+    let rep = Report {
+        syslinux: Some(sl),
+        ..Report::default()
+    };
+    let asks = |fs, scheme, target| syslinux_download(&rep, fs, scheme, target).is_some();
+    assert!(asks(Fs::Fat32, Scheme::Mbr, Target::Bios));
+    assert!(asks(Fs::Fat32, Scheme::Mbr, Target::BiosUefi));
+    assert!(!asks(Fs::Fat32, Scheme::Mbr, Target::Uefi));
+    assert!(!asks(Fs::Fat32, Scheme::Gpt, Target::Uefi));
+    assert!(!asks(Fs::Ext4, Scheme::Mbr, Target::Bios));
+    // Syslinux 5 can't boot NTFS, so the write is refused instead.
+    assert!(!asks(Fs::Ntfs, Scheme::Mbr, Target::Bios));
+    assert!(syslinux_download(&Report::default(), Fs::Fat32, Scheme::Mbr, Target::Bios).is_none());
 }
 
 /// Knoppix' /boot/syslinux symlink becomes a directory of EFI redirect configs.

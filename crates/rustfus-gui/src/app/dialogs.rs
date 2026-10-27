@@ -9,7 +9,7 @@ use eframe::egui::{self, Color32};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{self, Msg};
 use rustfus_core::update::{Interval, Version};
-use rustfus_core::{drives, fido, net};
+use rustfus_core::{drives, fido, net, syslinux};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -44,6 +44,24 @@ impl App {
                             stage = Some(1);
                         }
                         if ui.button(t("MSG_007")).clicked() {
+                            next = Some(Dialog::None);
+                        }
+                    });
+                });
+            }
+            Dialog::SyslinuxDownload(v) => {
+                let v = v.clone();
+                let embedded = syslinux::embedded_version();
+                let allow = &mut self.allow_downloads;
+                modal("syslinux_download", &mut |ui| {
+                    ui.heading(t("MSG_115"));
+                    ui.label(rustfus_name(&tf("MSG_114", &[&v, "", &embedded, ""])));
+                    ui.horizontal(|ui| {
+                        if ui.button(t("MSG_008")).clicked() {
+                            *allow = true;
+                            stage = Some(2);
+                        }
+                        if ui.button(t("MSG_009")).clicked() {
                             next = Some(Dialog::None);
                         }
                     });

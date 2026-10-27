@@ -344,20 +344,63 @@ pub fn knoppix_redirects(
     Some(out)
 }
 
+/// The embedded Syslinux 5+ loader's version ("6.04/pre1"), the one images of
+/// other versions need a download to replace.
+pub fn embedded_version() -> String {
+    let (v, ext) = embedded(true);
+    format!("{}.{:02}{ext}", v >> 8, v & 0xff)
+}
+
+/// Whether `info` is exactly the embedded Syslinux 5+ loader's version.
+fn is_embedded_v6(info: &Info) -> bool {
+    let emb = embedded(true);
+    let version = ((info.major as u16) << 8) | info.minor as u16;
+    (version, info.ext.as_str()) == (emb.0, emb.1.as_str())
+}
+
+/// Server/cache path of `file` for Syslinux `version` + `ext`.
+fn loader_rel(version: &str, ext: &str, file: &str) -> String {
+    format!("syslinux-{version}{ext}/{file}")
+}
+
+/// Whether [`loader`] would have to download ldlinux.sys and ldlinux.bss for
+/// `info`, so the user must be asked first like Rufus' "Download required".
+pub fn needs_download(info: &Info) -> bool {
+    if info.major < 5 || is_embedded_v6(info) {
+        return false;
+    }
+    let cached = |ext: &str| {
+        ["ldlinux.sys", "ldlinux.bss"]
+            .iter()
+            .all(|f| crate::net::cached_signed(&loader_rel(&info.version, ext, f)).is_some())
+    };
+    !cached(&info.ext) && (info.ext.is_empty() || !cached(""))
+}
+
 /// ldlinux.sys and ldlinux.bss for `info`: embedded v4 for Syslinux < 5, embedded v6
-/// for an exact version match, otherwise downloaded from Rufus' server (cached).
-pub fn loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), String> {
+/// for an exact version match, otherwise from Rufus' server (cached). Without
+/// `allow_download`, only cached copies are used.
+pub fn loader(
+    info: &Info,
+    allow_download: bool,
+    log: &dyn Fn(String),
+) -> Result<(Vec<u8>, Vec<u8>), String> {
     if info.major < 5 {
         return Ok((V4_SYS.to_vec(), V4_BSS.to_vec()));
     }
-    let emb = embedded(true);
-    let version = ((info.major as u16) << 8) | info.minor as u16;
-    if (version, info.ext.as_str()) == (emb.0, emb.1.as_str()) {
+    if is_embedded_v6(info) {
         return Ok((V6_SYS.to_vec(), V6_BSS.to_vec()));
     }
+    let emb = embedded(true);
+    let version = ((info.major as u16) << 8) | info.minor as u16;
     let get = |ext: &str, file: &str| {
-        let rel = format!("syslinux-{}{ext}/{file}", info.version);
-        crate::net::fetch_signed(&format!("{}/{rel}", crate::net::FILES_URL), &rel)
+        let rel = loader_rel(&info.version, ext, file);
+        if allow_download {
+            crate::net::fetch_signed(&format!("{}/{rel}", crate::net::FILES_URL), &rel)
+        } else {
+            crate::net::cached_signed(&rel)
+                .ok_or_else(|| format!("{file} must be downloaded, which was not allowed"))
+        }
     };
     let mut files = Vec::new();
     for file in ["ldlinux.sys", "ldlinux.bss"] {
@@ -581,8 +624,12 @@ fn patch(img: &mut [u8], bss: &mut [u8], sectors: &[u64], subdir: &str) -> Resul
 
 /// ldlinux.sys and .bss for `info`, the image padded to whole sectors so the
 /// ADV that follows it is sector-aligned, as upstream's installer does.
-fn padded_loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), String> {
-    let (mut img, bss) = loader(info, log)?;
+fn padded_loader(
+    info: &Info,
+    allow_download: bool,
+    log: &dyn Fn(String),
+) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let (mut img, bss) = loader(info, allow_download, log)?;
     if bss.len() < SECTOR {
         return Err("ldlinux.bss is too small".into());
     }
@@ -643,9 +690,11 @@ fn read_bootsect<F: Read + Seek>(vol: &mut F) -> Result<([u8; SECTOR], VolumeKin
 }
 
 /// Installs ldlinux.sys and the Syslinux boot sector on a formatted, populated FAT volume.
+/// `allow_download` is as for [`loader`].
 pub fn install<F: Read + Write + Seek>(
     vol: &mut F,
     info: &Info,
+    allow_download: bool,
     log: &dyn Fn(String),
 ) -> Result<(), String> {
     let e = |err: io::Error| format!("Syslinux install: {err}");
@@ -653,7 +702,7 @@ pub fn install<F: Read + Write + Seek>(
         "Installing Syslinux {}{}...",
         info.version, info.ext
     ));
-    let (img, bss) = padded_loader(info, log)?;
+    let (img, bss) = padded_loader(info, allow_download, log)?;
     let (bs, kind) = read_bootsect(vol)?;
     if kind != VolumeKind::Fat {
         return Err("Syslinux install: not a FAT volume".into());
@@ -687,14 +736,20 @@ pub fn install<F: Read + Write + Seek>(
 
 /// First step of installing Syslinux on a volume Rustfus can't write itself
 /// (NTFS): writes ldlinux.sys under the mounted `root` and maps its sectors.
-/// Finish with [`install_staged`] once the volume is unmounted.
-pub fn stage(root: &Path, info: &Info, log: &dyn Fn(String)) -> Result<Staged, String> {
+/// Finish with [`install_staged`] once the volume is unmounted. `allow_download`
+/// is as for [`loader`].
+pub fn stage(
+    root: &Path,
+    info: &Info,
+    allow_download: bool,
+    log: &dyn Fn(String),
+) -> Result<Staged, String> {
     let e = |err: io::Error| format!("Syslinux install: {err}");
     log(format!(
         "Installing Syslinux {}{}...",
         info.version, info.ext
     ));
-    let (img, bss) = padded_loader(info, log)?;
+    let (img, bss) = padded_loader(info, allow_download, log)?;
     let path = root.join("ldlinux.sys");
     // A read-only copy from an earlier run can't be opened for writing.
     std::fs::remove_file(&path).ok();

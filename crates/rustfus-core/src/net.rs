@@ -82,9 +82,8 @@ pub fn verify(data: &[u8], sig: &[u8]) -> bool {
     key.verify(scheme, &Sha256::digest(data), sig).is_ok()
 }
 
-/// Fetches a file signed by Rufus (`url` + `.sig`), caching it under
-/// `cache_dir()/rel`. Cached copies are re-verified on every use.
-pub fn fetch_signed(url: &str, rel: &str) -> Result<Vec<u8>, String> {
+/// Where [`fetch_signed`] caches `rel` and its signature.
+fn cache_paths(rel: &str) -> (PathBuf, PathBuf) {
     let path = cache_dir().join(rel);
     let sig_path = path.with_extension(format!(
         "{}sig",
@@ -92,11 +91,24 @@ pub fn fetch_signed(url: &str, rel: &str) -> Result<Vec<u8>, String> {
             .map(|e| format!("{}.", e.to_string_lossy()))
             .unwrap_or_default()
     ));
-    if let (Ok(d), Ok(s)) = (std::fs::read(&path), std::fs::read(&sig_path))
-        && verify(&d, &s)
-    {
-        return Ok(d);
+    (path, sig_path)
+}
+
+/// The copy of `rel` an earlier [`fetch_signed`] cached, if its signature still checks out.
+pub fn cached_signed(rel: &str) -> Option<Vec<u8>> {
+    let (path, sig_path) = cache_paths(rel);
+    let data = std::fs::read(&path).ok()?;
+    let sig = std::fs::read(&sig_path).ok()?;
+    verify(&data, &sig).then_some(data)
+}
+
+/// Fetches a file signed by Rufus (`url` + `.sig`), caching it under
+/// `cache_dir()/rel`. Cached copies are re-verified on every use.
+pub fn fetch_signed(url: &str, rel: &str) -> Result<Vec<u8>, String> {
+    if let Some(data) = cached_signed(rel) {
+        return Ok(data);
     }
+    let (path, sig_path) = cache_paths(rel);
     let data = fetch(url)?;
     let sig = fetch(&format!("{url}.sig"))?;
     if !verify(&data, &sig) {

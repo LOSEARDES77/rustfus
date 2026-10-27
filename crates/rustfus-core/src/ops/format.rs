@@ -53,7 +53,7 @@ pub(super) fn write_fat(
     vol.seek(SeekFrom::Start(0)).map_err(e)?;
     if let Some(sl) = sl {
         ctx.progress(1.0, "Installing Syslinux...");
-        syslinux::install(&mut vol, sl, &|m| ctx.log(m))?;
+        syslinux::install(&mut vol, sl, job.allow_downloads, &|m| ctx.log(m))?;
     } else if job.fs == Fs::Fat32 && job.target != Target::Uefi {
         if job.boot == Boot::FreeDos {
             bootrec::write_fat32_freedos_pbr(&mut vol).map_err(e)?;
@@ -65,21 +65,22 @@ pub(super) fn write_fat(
 }
 
 /// Whether Syslinux, detected as `sl`, gets installed for BIOS boot from
-/// `job.fs`. Like Rufus' BootCheck, an image only Syslinux can BIOS-boot is
+/// `fs`. Like Rufus' BootCheck, an image only Syslinux can BIOS-boot is
 /// refused on a filesystem Syslinux can't read: exFAT (no Syslinux driver) or
 /// NTFS before Syslinux 6. GRUB 2 images fall back to GRUB instead.
 pub(super) fn syslinux_for(
-    job: &Job,
     rep: &Report,
+    fs: Fs,
+    scheme: Scheme,
+    target: Target,
     sl: Option<syslinux::Info>,
 ) -> Result<Option<syslinux::Info>, String> {
     let Some(sl) = sl else {
         return Ok(None);
     };
-    if rep.windows || job.target == Target::Uefi || job.scheme != Scheme::Mbr {
+    if rep.windows || target == Target::Uefi || scheme != Scheme::Mbr {
         return Ok(None);
     }
-    let fs = job.fs;
     let ntfs_ok = sl.major >= 6;
     // Rustfus writes NTFS through the OS driver and needs it to map ldlinux.sys.
     let ntfs_here = cfg!(target_os = "linux");
@@ -120,7 +121,7 @@ fn stage_syslinux(
         dest.put(&path, &data).map_err(e)?;
     }
     ctx.progress(1.0, "Installing Syslinux...");
-    syslinux::stage(root, sl, &|m| ctx.log(m))
+    syslinux::stage(root, sl, job.allow_downloads, &|m| ctx.log(m))
 }
 
 /// ISO mode / format: partition, create the filesystem, copy files, install boot code.
@@ -152,11 +153,17 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     }
     let label = sanitize_label(&job.label, fs);
     // Like Rufus: Syslinux only for non-Windows, BIOS-capable targets.
-    let sl = syslinux_for(job, &rep, iso.as_ref().and_then(syslinux::detect))?;
+    let sl = syslinux_for(
+        &rep,
+        fs,
+        job.scheme,
+        job.target,
+        iso.as_ref().and_then(syslinux::detect),
+    )?;
     if let Some(sl) = &sl {
         ctx.log(format!("Syslinux {}{} detected", sl.version, sl.ext));
         // Fetch a non-embedded loader now so a download failure leaves the drive untouched.
-        syslinux::loader(sl, &|m| ctx.log(m))?;
+        syslinux::loader(sl, job.allow_downloads, &|m| ctx.log(m))?;
     }
     let parts = layout(
         job,
