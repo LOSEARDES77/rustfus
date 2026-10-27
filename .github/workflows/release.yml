@@ -194,7 +194,7 @@ jobs:
           dir="rustfus-${GITHUB_REF_NAME}-third-party-sources"
           mkdir -p "$dir" dist
           grep -E '^https://' res/SOURCES.txt | while read -r url; do
-            name=$(echo "$url" | sed -E 's|https://||; s|/archive/refs/tags/|-|; s|/archive/|-|; s|[/]|_|g')
+            name=$(echo "$url" | sed -E 's|https://||; s|^web\.archive\.org/web/[0-9]+id_/https://||; s|/archive/refs/tags/|-|; s|/archive/|-|; s|[/]|_|g')
             curl -fsSL --retry 3 -o "$dir/$name" "$url"
           done
           cp res/SOURCES.txt THIRD_PARTY_NOTICES.md "$dir/"
