@@ -19,11 +19,16 @@ First public release. Untested on physical drives; see the README.
 - Linux live media: GRUB 2 and Syslinux, persistent partitions. Like Rufus,
   replacing an image's obsolete `menu.c32`/`vesamenu.c32` asks first (or needs
   `--allow-downloads` on the command line).
+- Syslinux 6+ on NTFS (Linux), the Knoppix EFI symlink workaround, and a clear
+  refusal when only Syslinux could BIOS-boot an image from exFAT or old-Syslinux NTFS.
 - FreeDOS, bad blocks check, checksums, runtime UEFI media validation.
 - Built-in MBR/GPT, FAT16/FAT32 and ext2/3/4 formatters.
 - Windows ISO download through Fido, with or without PowerShell.
 - Saving drives to `.img`, `.vhd` or `.vhdx`.
 - 38 languages from Rufus' translations.
+- Update check against GitHub releases (`rustfus check-update` and the
+  settings window), with Rufus' update policy: ask on first launch, check
+  interval, optional beta versions.
 - Release packages: Windows `.exe`, macOS `.dmg`, AppImage, `.deb`, `.rpm`
   and Arch `.pkg.tar.zst`.
 

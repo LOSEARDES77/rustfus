@@ -19,6 +19,7 @@ pub mod net;
 pub mod ops;
 pub mod part;
 pub mod syslinux;
+pub mod update;
 pub mod vhdx;
 pub mod wtg;
 pub mod wue;

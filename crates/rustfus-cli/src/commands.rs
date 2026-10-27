@@ -5,6 +5,7 @@
 use crate::args::{Cmd, DownloadArgs, WriteArgs, WueArg};
 use rustfus_core::drives::{self, Drive, human};
 use rustfus_core::ops::{self, Boot, Fs, Job, Msg, Report, Scheme, Target};
+use rustfus_core::update::{self, Version};
 use rustfus_core::{fido, image, iso, net, wtg, wue};
 use std::io::{BufRead, Write};
 use std::path::Path;
@@ -28,7 +29,20 @@ pub fn run(cmd: Cmd) -> Result<(), String> {
             run_job(move |tx, c| ops::save_drive(&d, &output, tx, c))
         }
         Cmd::Download(a) => download(a),
+        Cmd::CheckUpdate { betas } => check_update(betas),
     }
+}
+
+fn check_update(include_betas: bool) -> Result<(), String> {
+    let current = Version::current();
+    match update::check(include_betas)? {
+        Some(r) => println!(
+            "Rustfus {} is available (you have {current}): {}",
+            r.version, r.url
+        ),
+        None => println!("Rustfus {current} is up to date"),
+    }
+    Ok(())
 }
 
 fn list(all: bool) -> Result<(), String> {
