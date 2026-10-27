@@ -70,5 +70,5 @@ builds compile cleanly but have not been run on those systems.
 | Log, About, dark mode | 🟢 | 🟢 | 🟢 | |
 | Drag and drop images | 🟢 | 🟢 | 🟢 | |
 | Windows ISO download (Fido) | 🟢 | 🟢 | 🟢 | Runs Fido.ps1 when PowerShell (`pwsh`) is installed, else built-in |
-| Update check | 🔴 | 🔴 | 🔴 | not implemented |
+| Update check (GitHub releases) | 🟢 | 🟢 | 🟢 | asks on first launch; daily/weekly/monthly, optional betas; needs `curl` |
 | Runs without root / Administrator | 🔴 | 🔴 | 🔴 | raw disk access needs elevation |

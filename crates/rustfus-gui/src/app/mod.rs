@@ -11,6 +11,7 @@ use eframe::egui::{self};
 use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Boot, Fs, Job, Msg, Report, Scheme, Target};
+use rustfus_core::update::{self, Release};
 use rustfus_core::{drives, fido, image, iso, loc, ops, wtg, wue};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -36,6 +37,8 @@ enum Dialog {
     Confirm,
     Hash(Option<[String; 4]>, f32),
     Fido(FidoState),
+    UpdatePolicy,
+    NewVersion(Release),
     Error(String),
 }
 
@@ -111,6 +114,13 @@ struct App {
     dark: bool,
     log: Vec<String>,
 
+    update: update::Settings,
+    update_rx: Option<Receiver<Result<Option<Release>, String>>>,
+    /// Started with "Check Now": a newer release always gets its dialog.
+    update_manual: bool,
+    /// Outcome of the last check, shown in the settings window.
+    update_note: String,
+
     busy: Option<(Receiver<Msg>, Arc<AtomicBool>)>,
     hash_rx: Option<Receiver<(f32, Option<[String; 4]>)>>,
     progress: f32,
@@ -160,7 +170,8 @@ impl App {
         loc::set_language(&loc::default_for_system());
         let list_all = Arc::new(AtomicBool::new(false));
         let rescan = Arc::new(AtomicBool::new(false));
-        App {
+        let saved_policy = update::Settings::load();
+        let mut app = App {
             drives: Vec::new(),
             selected: None,
             scan_rx: spawn_scanner(cc.egui_ctx.clone(), list_all.clone(), rescan.clone()),
@@ -201,12 +212,20 @@ impl App {
             edition: 0,
             download_mode: false,
             pending_image: None,
-            dialog: Dialog::None,
+            dialog: if saved_policy.is_some() {
+                Dialog::None
+            } else {
+                Dialog::UpdatePolicy
+            },
             show_log: false,
             show_about: false,
             show_settings: false,
             dark: false,
             log: vec![format!("Rustfus {}", env!("CARGO_PKG_VERSION"))],
+            update: saved_policy.clone().unwrap_or_default(),
+            update_rx: None,
+            update_manual: false,
+            update_note: String::new(),
             busy: None,
             hash_rx: None,
             progress: 0.0,
@@ -215,7 +234,11 @@ impl App {
             started: None,
             elapsed: Duration::ZERO,
             height: 0.0,
+        };
+        if saved_policy.is_some_and(|s| s.is_due(update::now())) {
+            app.check_updates(&cc.egui_ctx, /* manual= */ false);
         }
+        app
     }
 
     fn drive(&self) -> Option<&Drive> {
@@ -370,7 +393,56 @@ impl App {
         self.spawn(ctx, move |tx, c| ops::run_job(&job, tx, c));
     }
 
+    fn check_updates(&mut self, ctx: &egui::Context, manual: bool) {
+        let (tx, rx) = channel();
+        let include_betas = self.update.include_betas;
+        let ctx = ctx.clone();
+        std::thread::spawn(move || {
+            tx.send(update::check(include_betas)).ok();
+            ctx.request_repaint();
+        });
+        self.update_rx = Some(rx);
+        self.update_manual = manual;
+        self.update_note = rustfus_name(&t("MSG_243"));
+        self.log.push(self.update_note.clone());
+    }
+
+    fn on_update_checked(&mut self, result: Result<Option<Release>, String>) {
+        match result {
+            Ok(found) => {
+                self.update.last_check = update::now();
+                if let Err(err) = self.update.save() {
+                    self.log
+                        .push(format!("Could not save the update settings: {err}"));
+                }
+                self.update_note = rustfus_name(&t(if found.is_some() {
+                    "MSG_246"
+                } else {
+                    "MSG_247"
+                }));
+                self.log.push(self.update_note.clone());
+                // An automatic check must not interrupt START or a running job.
+                if let Some(r) = found
+                    && (self.update_manual
+                        || (matches!(self.dialog, Dialog::None) && self.busy.is_none()))
+                {
+                    self.dialog = Dialog::NewVersion(r);
+                }
+            }
+            Err(err) => {
+                self.update_note = t("MSG_244");
+                self.log.push(format!("{}: {err}", self.update_note));
+            }
+        }
+    }
+
     fn poll(&mut self) {
+        if let Some(rx) = &self.update_rx
+            && let Ok(r) = rx.try_recv()
+        {
+            self.update_rx = None;
+            self.on_update_checked(r);
+        }
         while let Ok(d) = self.scan_rx.try_recv() {
             if self.busy.is_none() {
                 self.set_drives(d);
@@ -530,6 +602,11 @@ impl eframe::App for App {
         }
         self.dialogs(&ctx);
     }
+}
+
+/// Rufus' strings with Rustfus' name, for the ones that name the program.
+fn rustfus_name(s: &str) -> String {
+    s.replace("Rufus", "Rustfus")
 }
 
 pub fn run() -> eframe::Result {

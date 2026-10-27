@@ -24,6 +24,9 @@ First public release. Untested on physical drives; see the README.
 - Windows ISO download through Fido, with or without PowerShell.
 - Saving drives to `.img`, `.vhd` or `.vhdx`.
 - 38 languages from Rufus' translations.
+- Update check against GitHub releases (`rustfus check-update` and the
+  settings window), with Rufus' update policy: ask on first launch, check
+  interval, optional beta versions.
 - Release packages: Windows `.exe`, macOS `.dmg`, AppImage, `.deb`, `.rpm`
   and Arch `.pkg.tar.zst`.
 
