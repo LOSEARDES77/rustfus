@@ -15,9 +15,8 @@ Rustfus saves me from doing that.
 
 > **This project was vibe coded.** It was written with an AI coding assistant
 > (Claude Code), using the Rufus source code as the reference. It has
-> automated tests, but it has **not yet been tested on physical USB drives**,
-> and the Windows and macOS builds compile but haven't been run on those
-> systems. Creating bootable media erases the selected drive: double-check
+> automated tests; the Windows and macOS builds compile but haven't been run
+> on those systems. Creating bootable media erases the selected drive: double-check
 > the device you pick, and use it at your own risk.
 
 Rustfus is an independent project. It is not affiliated with or endorsed by
