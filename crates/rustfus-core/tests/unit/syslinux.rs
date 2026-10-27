@@ -197,12 +197,47 @@ fn detect_from_iso() {
     );
     assert_eq!(info.cfg_path, "/isolinux/isolinux.cfg");
     assert!(info.reactos.is_none() && !info.overwrite_cfg);
-    let extra = extra_files(&iso, &info, &|_| {}).unwrap();
+    let extra = extra_files(&iso, &info, &[], &|_| {}).unwrap();
     assert_eq!(extra.len(), 1);
     assert_eq!(extra[0].0, "syslinux.cfg");
     assert_eq!(
         String::from_utf8_lossy(&extra[0].1),
         "DEFAULT loadconfig\n\nLABEL loadconfig\n  CONFIG /isolinux/isolinux.cfg\n  APPEND /isolinux/\n"
+    );
+    std::fs::remove_dir_all(dir).ok();
+    std::fs::remove_file(iso_path).ok();
+}
+
+#[test]
+fn old_c32_kept_unless_approved() {
+    let dir = tmp("isoroot-c32");
+    let iso_path = tmp("test-c32.iso");
+    std::fs::create_dir_all(dir.join("isolinux")).unwrap();
+    let mut bin = vec![0u8; 4096];
+    let s = b"ISOLINUX 4.07 2013-07-25\0";
+    bin[1000..1000 + s.len()].copy_from_slice(s);
+    std::fs::write(dir.join("isolinux/isolinux.bin"), &bin).unwrap();
+    std::fs::write(dir.join("isolinux/isolinux.cfg"), "DEFAULT linux\n").unwrap();
+    std::fs::write(dir.join("isolinux/menu.c32"), [0u8; 64]).unwrap();
+    let status = Command::new("xorriso")
+        .args(["-as", "mkisofs", "-quiet", "-R", "-J", "-o"])
+        .arg(&iso_path)
+        .arg(&dir)
+        .status();
+    if !status.is_ok_and(|s| s.success()) {
+        eprintln!("xorriso unavailable, skipping");
+        return;
+    }
+    let iso = crate::iso::Iso::open(&iso_path).unwrap();
+    let info = detect(&iso).unwrap();
+    assert_eq!(info.old_c32, ["isolinux/menu.c32"]);
+    let logs = std::cell::RefCell::new(Vec::new());
+    let extra = extra_files(&iso, &info, &[], &|m| logs.borrow_mut().push(m)).unwrap();
+    assert!(extra.iter().all(|(path, _)| path != "isolinux/menu.c32"));
+    assert!(
+        logs.borrow()
+            .iter()
+            .any(|m| m.contains("Keeping the obsolete"))
     );
     std::fs::remove_dir_all(dir).ok();
     std::fs::remove_file(iso_path).ok();
