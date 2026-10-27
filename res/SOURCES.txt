@@ -17,11 +17,13 @@ https://github.com/pbatard/ntfs-3g/archive/refs/tags/1.9.tar.gz
 https://github.com/pbatard/efifs/archive/refs/tags/v1.12.tar.gz
 # res/md5
 https://github.com/pbatard/uefi-md5sum/archive/refs/tags/v1.2.tar.gz
-# res/freedos (FreeDOS 1.4 packages, which include their SOURCE)
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/kernel.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/freecom.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/display.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/cpidos.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb_lay.zip
-https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mode.zip
+# res/freedos (FreeDOS 1.4 packages, which include their SOURCE). Fetched from
+# pinned Wayback Machine snapshots because www.ibiblio.org is unreliable; the
+# release workflow strips the web.archive.org prefix from the saved file names.
+https://web.archive.org/web/20250912221525id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/kernel.zip
+https://web.archive.org/web/20250808103226id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/freecom.zip
+https://web.archive.org/web/20250912221557id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/display.zip
+https://web.archive.org/web/20250808103210id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/cpidos.zip
+https://web.archive.org/web/20250808103212id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb.zip
+https://web.archive.org/web/20250808103212id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/keyb_lay.zip
+https://web.archive.org/web/20250913080259id_/https://www.ibiblio.org/pub/micro/pc-stuff/freedos/files/repositories/1.4/base/mode.zip
