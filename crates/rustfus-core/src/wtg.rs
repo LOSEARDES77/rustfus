@@ -52,8 +52,10 @@ pub fn editions(iso: &Iso) -> Result<Vec<(u32, String)>, String> {
 
 fn parse_editions(utf16: &[u8]) -> Vec<(u32, String)> {
     let units: Vec<u16> = utf16
-        .chunks_exact(2)
-        .map(|c| u16::from_le_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| u16::from_le_bytes(*c))
         .collect();
     let xml = String::from_utf16_lossy(&units);
     let tag = |s: &str, t: &str| -> Option<String> {

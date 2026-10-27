@@ -128,7 +128,7 @@ impl Iso {
     /// on the ISO9660 side.
     pub fn open(path: &Path) -> io::Result<Iso> {
         let f = File::open(path)?;
-        Self::open_udf(f.try_clone()?).or_else(|_| Self::open_iso9660(f))
+        Self::open_iso9660(f.try_clone()?).or_else(|e| Self::open_udf(f).map_err(|_| e))
     }
 
     fn open_iso9660(f: File) -> io::Result<Iso> {
@@ -363,8 +363,10 @@ impl Iso {
                 (Some(n), _) => n,
                 (None, Names::Joliet) => {
                     let u: Vec<u16> =
-                        r.id.chunks_exact(2)
-                            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+                        r.id.as_chunks::<2>()
+                            .0
+                            .iter()
+                            .map(|c| u16::from_be_bytes(*c))
                             .collect();
                     let n = String::from_utf16_lossy(&u);
                     n.split(';').next().unwrap_or("").to_string()
