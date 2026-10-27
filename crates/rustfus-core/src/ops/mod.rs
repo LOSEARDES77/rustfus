@@ -6,7 +6,7 @@ use crate::drives::Drive;
 use crate::drives::run;
 #[cfg(windows)]
 use crate::fsos;
-use crate::{image, iso, wue};
+use crate::{image, iso, syslinux, wue};
 use std::fs::{File, OpenOptions};
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -166,6 +166,9 @@ pub struct Job {
     pub wue: wue::Options,
     /// User agreed to fetch boot files matching the image (GRUB core.img, Syslinux).
     pub allow_downloads: bool,
+    /// Obsolete menu.c32/vesamenu.c32 in the image (from `obsolete_c32`) the user
+    /// agreed to replace with downloaded copies.
+    pub replace_c32: Vec<String>,
     /// Windows To Go: install.wim image index to apply instead of copying files.
     pub wtg: Option<u32>,
 }
@@ -180,6 +183,8 @@ pub struct Report {
     pub bios: bool,
     pub grub2: bool,
     pub grub2_version: String,
+    /// Obsolete menu.c32/vesamenu.c32 of a Syslinux < 5 image (ISO paths).
+    pub old_c32: Vec<String>,
     pub large_file: bool,
     pub hybrid: bool,
     pub casper: bool,
@@ -275,11 +280,22 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
             grub_version(&buf)
         })
         .unwrap_or_default();
+    let windows = has("sources/install.wim") || has("sources/install.esd") || has("bootmgr");
+    // Syslinux is never installed for Windows images; extra_files only replaces c32 for v4.
+    let old_c32 = if windows {
+        Vec::new()
+    } else {
+        syslinux::detect(&iso)
+            .filter(|sl| sl.major < 5)
+            .map(|sl| sl.old_c32)
+            .unwrap_or_default()
+    };
     Ok(Report {
         grub2_version,
+        old_c32,
         is_iso: true,
         label: iso.volume_id(),
-        windows: has("sources/install.wim") || has("sources/install.esd") || has("bootmgr"),
+        windows,
         efi: et.efi
             || lower
                 .iter()
@@ -309,6 +325,16 @@ pub fn needs_grub_download(rep: &Report, scheme: Scheme, target: Target) -> bool
         && target != Target::Uefi
         && !rep.grub2_version.is_empty()
         && rep.grub2_version != GRUB2_VERSION
+}
+
+/// Obsolete Syslinux menu modules a write with these settings would offer to replace:
+/// Syslinux is only installed on FAT, MBR, BIOS-capable targets (see `write_fs`).
+pub fn obsolete_c32(rep: &Report, fs: Fs, scheme: Scheme, target: Target) -> &[String] {
+    if fs.is_fat() && scheme == Scheme::Mbr && target != Target::Uefi {
+        &rep.old_c32
+    } else {
+        &[]
+    }
 }
 
 /// GRUB embeds "GNU GRUB  version X" in its modules, as Rufus' scan relies on.

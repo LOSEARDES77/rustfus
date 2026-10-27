@@ -88,7 +88,7 @@ Rustfus itself does.
 | BIOS boot via GRUB 2 | 🟢 | 🟢 | 🟢 | embedded core.img 2.14 |
 | BIOS boot via Syslinux / Isolinux | 🟢 | 🟢 | 🟢 | embedded v4 / v6 |
 | Download matching GRUB / Syslinux version (signed, rufus.ie) | 🟢 | 🟢 | 🟢 | needs `curl` (built into Windows 10+ / macOS) |
-| Prompt before downloading GRUB / Syslinux files | 🔴 | 🔴 | 🔴 | Rustfus downloads signed files silently |
+| Prompt before downloading GRUB / Syslinux files | 🟡 | 🟡 | 🟡 | GRUB core.img and obsolete menu.c32 / vesamenu.c32 ask first; ldlinux.sys / .bss still download silently |
 | Syslinux on NTFS / exFAT | 🔴 | 🔴 | 🔴 | |
 | Knoppix EFI symlink workaround | 🔴 | 🔴 | 🔴 | |
 | Persistent partition (Ubuntu casper / Debian live) | 🟢 | 🟢 | 🟢 | own ext3 formatter |

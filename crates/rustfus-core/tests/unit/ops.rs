@@ -162,6 +162,7 @@ fn test_job(drive: Drive, iso: PathBuf) -> Job {
             ..Default::default()
         },
         allow_downloads: false,
+        replace_c32: Vec::new(),
         wtg: None,
     }
 }

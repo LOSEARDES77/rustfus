@@ -251,9 +251,12 @@ pub fn detect(iso: &crate::iso::Iso) -> Option<Info> {
 }
 
 /// Files to write to the FAT root after copying the ISO (overwriting same-named copies).
+/// Of `info.old_c32`, only the paths in `replace` (the ones the user agreed to download
+/// newer copies of, as with Rufus' "Replace menu.c32?" prompt) are replaced.
 pub fn extra_files(
     iso: &crate::iso::Iso,
     info: &Info,
+    replace: &[String],
     log: &dyn Fn(String),
 ) -> Result<Vec<(String, Vec<u8>)>, String> {
     if let Some(r) = &info.reactos {
@@ -292,6 +295,10 @@ pub fn extra_files(
         let ver = embedded(false).0;
         let ver = format!("{}.{:02}", ver >> 8, ver & 0xff);
         for path in &info.old_c32 {
+            if !replace.contains(path) {
+                log(format!("Keeping the obsolete '{path}' from the ISO"));
+                continue;
+            }
             let name = base(path).to_ascii_lowercase();
             let rel = format!("syslinux-{ver}/{name}");
             match crate::net::fetch_signed(&format!("{}/{rel}", crate::net::FILES_URL), &rel) {

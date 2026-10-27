@@ -31,9 +31,13 @@ enum BootSel {
 enum Dialog {
     None,
     Download,
+    /// Rufus' "Replace menu.c32?": index into the image's obsolete c32 files.
+    ReplaceC32(usize),
     Edition,
     Wue,
-    Hybrid { dd: bool },
+    Hybrid {
+        dd: bool,
+    },
     Confirm,
     Hash(Option<[String; 4]>, f32),
     Fido(FidoState),
@@ -101,6 +105,7 @@ struct App {
     wue_use_account: bool,
     dd: bool,
     allow_downloads: bool,
+    replace_c32: Vec<String>,
     wtg: bool,
     editions: Vec<(u32, String)>,
     edition: u32,
@@ -207,6 +212,7 @@ impl App {
             wue_use_account: false,
             dd: false,
             allow_downloads: false,
+            replace_c32: Vec::new(),
             wtg: false,
             editions: Vec::new(),
             edition: 0,
@@ -300,7 +306,7 @@ impl App {
         self.image_mode() && self.report.is_iso && !self.dd
     }
 
-    /// Rufus' START sequence: boot file download, WTG edition, Windows
+    /// Rufus' START sequence: boot file downloads, WTG edition, Windows
     /// customization or ISOHybrid choice, then the data-loss warning.
     /// `stage` is how far the user already got.
     fn next_dialog(&mut self, stage: u8) -> Dialog {
@@ -309,21 +315,29 @@ impl App {
         if stage < 1 && iso && ops::needs_grub_download(r, self.scheme, self.target) {
             return Dialog::Download;
         }
-        if stage < 2 && iso && r.windows && self.wtg {
+        if stage < 2 && iso && !self.obsolete_c32().is_empty() {
+            return Dialog::ReplaceC32(0);
+        }
+        if stage < 3 && iso && r.windows && self.wtg {
             return Dialog::Edition;
         }
-        if stage < 3 && iso && r.windows {
+        if stage < 4 && iso && r.windows {
             return Dialog::Wue;
         }
-        if stage < 3 && iso && r.hybrid {
+        if stage < 4 && iso && r.hybrid {
             self.dd = false;
             return Dialog::Hybrid { dd: false };
         }
         Dialog::Confirm
     }
 
+    fn obsolete_c32(&self) -> &[String] {
+        ops::obsolete_c32(&self.report, self.fs, self.scheme, self.target)
+    }
+
     fn on_start(&mut self) {
         self.allow_downloads = false;
+        self.replace_c32.clear();
         self.dialog = self.next_dialog(0);
     }
 
@@ -378,6 +392,7 @@ impl App {
                 ..self.wue.clone()
             },
             allow_downloads: self.allow_downloads,
+            replace_c32: self.replace_c32.clone(),
             wtg: (self.wtg && self.iso_mode() && self.report.windows).then_some(self.edition),
         };
         self.log.push(format!(
