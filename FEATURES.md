@@ -89,8 +89,9 @@ Rustfus itself does.
 | BIOS boot via Syslinux / Isolinux | 🟢 | 🟢 | 🟢 | embedded v4 / v6 |
 | Download matching GRUB / Syslinux version (signed, rufus.ie) | 🟢 | 🟢 | 🟢 | needs `curl` (built into Windows 10+ / macOS) |
 | Prompt before downloading GRUB / Syslinux files | 🔴 | 🔴 | 🔴 | Rustfus downloads signed files silently |
-| Syslinux on NTFS / exFAT | 🔴 | 🔴 | 🔴 | |
-| Knoppix EFI symlink workaround | 🔴 | 🔴 | 🔴 | |
+| Syslinux on NTFS | 🟡 | 🔴 | 🔴 | Syslinux 6+ only; Linux needs `mkfs.ntfs` and maps ldlinux.sys with FIEMAP/FIBMAP (Rufus uses FSCTL_GET_RETRIEVAL_POINTERS on Windows) |
+| Syslinux on exFAT | 🔴 | 🔴 | 🔴 | refused like Rufus: Syslinux has no exFAT driver |
+| Knoppix EFI symlink workaround | 🟢 | 🟢 | 🟢 | `/boot/syslinux` symlink replaced by `syslnx32/64.cfg` redirects |
 | Persistent partition (Ubuntu casper / Debian live) | 🟢 | 🟢 | 🟢 | own ext3 formatter |
 | ReactOS ISOs | 🟢 | 🟢 | 🟢 | booted through Syslinux v4 + mboot.c32 |
 | Grub4DOS ISOs | 🔴 | 🔴 | 🔴 | |
@@ -111,5 +112,6 @@ Rustfus itself does.
 | Command line | 🟢 | 🟢 | 🟢 | `list`, `info`, `write`, `save`, `download`, `hash` |
 | Privilege elevation | 🟢 | 🟢 | 🟡 | polkit / UAC manifest; macOS needs `sudo` |
 | Settings remembered between runs (registry / rufus.ini) | 🔴 | 🔴 | 🔴 | |
-| Update check | 🔴 | 🔴 | 🔴 | Rustfus has no release server yet |
+| Update check | 🟢 | 🟢 | 🟢 | GitHub releases, optional betas; needs `curl` |
+| Self-update | 🟡 | 🟡 | 🟡 | Rufus downloads and relaunches; Rustfus opens the GitHub release page, since it ships as several package formats |
 | Alt-key cheat modes (Alt-Z zero drive, Alt-S skip size checks, ...) | 🔴 | 🔴 | 🔴 | |
