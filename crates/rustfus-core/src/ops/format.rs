@@ -12,6 +12,7 @@ use crate::blockdev::BlockDev;
 use crate::{bootrec, fsos, iso, part, syslinux};
 use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
+use std::path::Path;
 
 /// FAT/FAT32 path: Rustfus formats and fills the partition itself.
 pub(super) fn write_fat(
@@ -63,6 +64,65 @@ pub(super) fn write_fat(
     vol.flush().map_err(e)
 }
 
+/// Whether Syslinux, detected as `sl`, gets installed for BIOS boot from
+/// `job.fs`. Like Rufus' BootCheck, an image only Syslinux can BIOS-boot is
+/// refused on a filesystem Syslinux can't read: exFAT (no Syslinux driver) or
+/// NTFS before Syslinux 6. GRUB 2 images fall back to GRUB instead.
+pub(super) fn syslinux_for(
+    job: &Job,
+    rep: &Report,
+    sl: Option<syslinux::Info>,
+) -> Result<Option<syslinux::Info>, String> {
+    let Some(sl) = sl else {
+        return Ok(None);
+    };
+    if rep.windows || job.target == Target::Uefi || job.scheme != Scheme::Mbr {
+        return Ok(None);
+    }
+    let fs = job.fs;
+    let ntfs_ok = sl.major >= 6;
+    // Rustfus writes NTFS through the OS driver and needs it to map ldlinux.sys.
+    let ntfs_here = cfg!(target_os = "linux");
+    if fs.is_fat() || (fs == Fs::Ntfs && ntfs_ok && ntfs_here) {
+        return Ok(Some(sl));
+    }
+    if rep.grub2 || !matches!(fs, Fs::Ntfs | Fs::Exfat) {
+        return Ok(None);
+    }
+    let why = match fs {
+        Fs::Ntfs if ntfs_ok => "Installing Syslinux on NTFS needs Linux".to_string(),
+        Fs::Ntfs => format!(
+            "Syslinux {} can't boot from NTFS (6.00 or later can)",
+            sl.version
+        ),
+        _ => "Syslinux can't boot from exFAT".to_string(),
+    };
+    let alternatives = if ntfs_ok && ntfs_here {
+        "FAT32 or NTFS"
+    } else {
+        "FAT32"
+    };
+    Err(format!(
+        "{why}. Use {alternatives}, or select UEFI as the target system."
+    ))
+}
+
+/// Writes Syslinux' extra files under the mounted `root` and stages ldlinux.sys there.
+fn stage_syslinux(
+    job: &Job,
+    iso: &iso::Iso,
+    sl: &syslinux::Info,
+    root: &Path,
+    ctx: &Ctx,
+) -> Result<syslinux::Staged, String> {
+    let dest = DirDest::Dir(root.to_path_buf());
+    for (path, data) in syslinux::extra_files(iso, sl, &job.replace_c32, &|m| ctx.log(m))? {
+        dest.put(&path, &data).map_err(e)?;
+    }
+    ctx.progress(1.0, "Installing Syslinux...");
+    syslinux::stage(root, sl, &|m| ctx.log(m))
+}
+
 /// ISO mode / format: partition, create the filesystem, copy files, install boot code.
 pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     let (iso, rep) = match &job.boot {
@@ -91,13 +151,8 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
         ));
     }
     let label = sanitize_label(&job.label, fs);
-    // Like Rufus: Syslinux only for FAT, non-Windows, BIOS-capable targets.
-    let sl = iso
-        .as_ref()
-        .filter(|_| {
-            fs.is_fat() && !rep.windows && job.target != Target::Uefi && job.scheme == Scheme::Mbr
-        })
-        .and_then(syslinux::detect);
+    // Like Rufus: Syslinux only for non-Windows, BIOS-capable targets.
+    let sl = syslinux_for(job, &rep, iso.as_ref().and_then(syslinux::detect))?;
     if let Some(sl) = &sl {
         ctx.log(format!("Syslinux {}{} detected", sl.version, sl.ext));
         // Fetch a non-embedded loader now so a download failure leaves the drive untouched.
@@ -163,11 +218,24 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
             ctx.progress(0.0, format!("Formatting ({})...", fs.name()));
             fsos::mkfs(&job.drive, 1, fs, &label, job.cluster)?;
         }
+        let mut staged = None;
         if needs_files {
             let mnt = fsos::mount(&job.drive, 1, fs)?;
-            let r = copy_files(job, &rep, iso.as_ref(), &DirDest::Dir(mnt.clone()), ctx);
+            let r = copy_files(job, &rep, iso.as_ref(), &DirDest::Dir(mnt.clone()), ctx).and_then(
+                |()| match (iso.as_ref(), sl.as_ref()) {
+                    (Some(iso), Some(sl)) => stage_syslinux(job, iso, sl, &mnt, ctx).map(Some),
+                    _ => Ok(None),
+                },
+            );
             fsos::unmount(&job.drive, 1, &mnt)?;
-            r?;
+            staged = r?;
+        }
+        if let (Some(sl), Some(staged)) = (&sl, staged) {
+            // Patched through the raw device, now that the driver's cache is gone.
+            let dev = open_dev(&job.drive)?;
+            let mut vol = BlockDev::new(&dev, parts[0].start, parts[0].size);
+            syslinux::install_staged(&mut vol, sl, staged, &|m| ctx.log(m))?;
+            vol.flush().map_err(e)?;
         }
         if fs == Fs::Ntfs && rep.windows && job.target != Target::Uefi && !cfg!(windows) {
             // mkntfs boot code can't load BOOTMGR; Windows' own format already can.

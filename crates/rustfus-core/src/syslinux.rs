@@ -4,11 +4,13 @@
 // Copyright © 2009-2014 Intel Corporation, Copyright © 2003 Lars Munch Christensen,
 // Copyright © 2012-2024 Pete Batard (GPL-2.0-or-later).
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-//! Syslinux support for ISO mode on FAT, ported from Rufus' syslinux.c/iso.c
-//! and Syslinux' libinstaller (syslxmod.c, fs.c, setadv.c).
+//! Syslinux support for ISO mode on FAT and NTFS, ported from Rufus' syslinux.c/iso.c
+//! and Syslinux' libinstaller (syslxmod.c, syslxcom.c, fs.c, setadv.c).
 
 use crate::bytes::{get16, get32, put16, put32, put64};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::File;
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::Path;
 
 const V4_SYS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v4.sys");
 const V4_BSS: &[u8] = include_bytes!("../../../res/syslinux/ldlinux_v4.bss");
@@ -21,6 +23,26 @@ const ADV_SIZE: usize = 512;
 const LDLINUX_MAGIC: u32 = 0x3eb2_02fe;
 const CFG_NAMES: [&str; 3] = ["isolinux.cfg", "syslinux.cfg", "extlinux.conf"];
 const OLD_C32: [(&str, u64); 2] = [("menu.c32", 53500), ("vesamenu.c32", 148000)];
+/// Configs Knoppix' EFI Syslinux looks for in /boot/syslinux.
+const KNOPPIX_EFI_CFGS: [&str; 2] = ["syslnx32.cfg", "syslnx64.cfg"];
+
+/// Volume types the Syslinux boot sector can load ldlinux.sys from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum VolumeKind {
+    Fat,
+    Ntfs,
+}
+
+/// ldlinux.sys written through the OS filesystem driver, waiting to be patched
+/// in place once the volume is unmounted.
+#[derive(Debug)]
+pub struct Staged {
+    /// Sector-padded ldlinux.sys, without the ADV.
+    img: Vec<u8>,
+    bss: Vec<u8>,
+    /// Volume-relative 512-byte sectors of ldlinux.sys, ADV included.
+    sectors: Vec<u64>,
+}
 
 #[derive(Debug, Clone)]
 pub struct Info {
@@ -295,6 +317,33 @@ pub fn extra_files(
     Ok(out)
 }
 
+/// Rufus' Knoppix workaround: Knoppix ships /boot/syslinux as a Rock Ridge
+/// symlink to `isolinux`, which FAT can't store, yet its EFI Syslinux reads
+/// syslnx32.cfg/syslnx64.cfg from there. Returns None when `link` isn't such a
+/// symlink, else the configs to write in a real `link` directory, each loading
+/// the ISO's own one. `find` looks a path up case-insensitively in the ISO.
+pub fn knoppix_redirects(
+    link: &str,
+    target: &str,
+    find: impl Fn(&str) -> Option<String>,
+) -> Option<Vec<(String, Vec<u8>)>> {
+    if !base(link).eq_ignore_ascii_case("syslinux") || !target.eq_ignore_ascii_case("isolinux") {
+        return None;
+    }
+    let isolinux_dir = format!("{}isolinux", &link[..link.len() - "syslinux".len()]);
+    let mut out = Vec::new();
+    for name in KNOPPIX_EFI_CFGS {
+        let Some(cfg) = find(&format!("{isolinux_dir}/{name}")) else {
+            continue;
+        };
+        let dir = cfg.rsplit_once('/').map_or("", |(dir, _)| dir);
+        let data =
+            format!("DEFAULT loadconfig\n\nLABEL loadconfig\n  CONFIG /{cfg}\n  APPEND /{dir}\n");
+        out.push((format!("{link}/{name}"), data.into_bytes()));
+    }
+    Some(out)
+}
+
 /// ldlinux.sys and ldlinux.bss for `info`: embedded v4 for Syslinux < 5, embedded v6
 /// for an exact version match, otherwise downloaded from Rufus' server (cached).
 pub fn loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), String> {
@@ -335,8 +384,17 @@ pub fn loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), S
     Ok((sys, bss))
 }
 
-/// libinstaller check_fat_bootsect + the media/sector-size checks of syslinux_check_bootsect.
-fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
+/// libinstaller ntfs_check_sb_fields: fields NTFS keeps zero plus a known OEM name.
+fn is_ntfs_bootsect(b: &[u8]) -> bool {
+    b[16..19] == [0; 3]
+        && get16(b, 19) == 0
+        && get16(b, 22) == 0
+        && get32(b, 32) == 0
+        && matches!(&b[3..11], b"NTFS    " | b"MSWIN4.0" | b"MSWIN4.1")
+}
+
+/// libinstaller syslinux_check_bootsect (check_fat_bootsect for FAT).
+fn check_bootsect(b: &[u8]) -> Result<VolumeKind, &'static str> {
     if b[21] != 0xf0 && b[21] < 0xf8 {
         return Err("invalid media signature (not an FAT/NTFS volume?)");
     }
@@ -349,6 +407,9 @@ fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
                 "impossible sector size"
             },
         );
+    }
+    if is_ntfs_bootsect(b) {
+        return Ok(VolumeKind::Ntfs);
     }
     let clustersize = b[13] as i64;
     if clustersize == 0 || clustersize & (clustersize - 1) != 0 {
@@ -399,7 +460,18 @@ fn check_bootsect(b: &[u8]) -> Result<(), &'static str> {
     } else {
         return Err("impossibly large number of clusters on an FAT volume");
     }
-    Ok(())
+    Ok(VolumeKind::Fat)
+}
+
+/// syslxcom.c syslinux_make_bootsect: jump (+ OEM name on FAT) and the code area
+/// come from the .bss, the BPB is kept.
+fn make_bootsect(bs: &mut [u8], bss: &[u8], kind: VolumeKind) {
+    let (head, code) = match kind {
+        VolumeKind::Fat => (11, 90),
+        VolumeKind::Ntfs => (3, 80),
+    };
+    bs[..head].copy_from_slice(&bss[..head]);
+    bs[code..510].copy_from_slice(&bss[code..510]);
 }
 
 /// setadv.c syslinux_reset_adv: two copies of an empty ADV.
@@ -507,29 +579,85 @@ fn patch(img: &mut [u8], bss: &mut [u8], sectors: &[u64], subdir: &str) -> Resul
     Ok(())
 }
 
+/// ldlinux.sys and .bss for `info`, the image padded to whole sectors so the
+/// ADV that follows it is sector-aligned, as upstream's installer does.
+fn padded_loader(info: &Info, log: &dyn Fn(String)) -> Result<(Vec<u8>, Vec<u8>), String> {
+    let (mut img, bss) = loader(info, log)?;
+    if bss.len() < SECTOR {
+        return Err("ldlinux.bss is too small".into());
+    }
+    img.resize(img.len().div_ceil(SECTOR) * SECTOR, 0);
+    Ok((img, bss))
+}
+
+/// Sectors ldlinux.sys spans once the ADV is appended to `img`.
+fn ldlinux_sectors(img: &[u8]) -> usize {
+    (img.len() + 2 * ADV_SIZE).div_ceil(SECTOR)
+}
+
+/// The directory Syslinux searches for its config, patched into ldlinux.sys.
+fn subdir(info: &Info) -> &str {
+    match info.cfg_path.rfind('/') {
+        Some(i) if i > 0 => &info.cfg_path[..i],
+        _ => info.cfg_path.as_str(),
+    }
+}
+
+/// Patches ldlinux.sys for its sectors, writes it there and points the boot
+/// sector `bs` (read from `vol`) at it.
+fn write_patched<F: Write + Seek>(
+    vol: &mut F,
+    info: &Info,
+    staged: Staged,
+    mut bs: [u8; SECTOR],
+    kind: VolumeKind,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
+    let e = |err: io::Error| format!("Syslinux install: {err}");
+    let Staged {
+        mut img,
+        mut bss,
+        sectors,
+    } = staged;
+    patch(&mut img, &mut bss, &sectors, subdir(info))?;
+    for (chunk, &s) in img.chunks(SECTOR).zip(&sectors) {
+        vol.seek(SeekFrom::Start(s * SECTOR as u64)).map_err(e)?;
+        vol.write_all(chunk).map_err(e)?;
+    }
+    make_bootsect(&mut bs, &bss, kind);
+    vol.seek(SeekFrom::Start(0)).map_err(e)?;
+    vol.write_all(&bs).map_err(e)?;
+    vol.flush().map_err(e)?;
+    vol.seek(SeekFrom::Start(0)).map_err(e)?;
+    log("Successfully wrote Syslinux boot record".into());
+    Ok(())
+}
+
+fn read_bootsect<F: Read + Seek>(vol: &mut F) -> Result<([u8; SECTOR], VolumeKind), String> {
+    let mut bs = [0u8; SECTOR];
+    vol.seek(SeekFrom::Start(0))
+        .and_then(|_| vol.read_exact(&mut bs))
+        .map_err(|err| format!("Syslinux install: {err}"))?;
+    let kind = check_bootsect(&bs).map_err(|m| format!("Syslinux install: {m}"))?;
+    Ok((bs, kind))
+}
+
 /// Installs ldlinux.sys and the Syslinux boot sector on a formatted, populated FAT volume.
 pub fn install<F: Read + Write + Seek>(
     vol: &mut F,
     info: &Info,
     log: &dyn Fn(String),
 ) -> Result<(), String> {
-    let e = |err: std::io::Error| format!("Syslinux install: {err}");
+    let e = |err: io::Error| format!("Syslinux install: {err}");
     log(format!(
         "Installing Syslinux {}{}...",
         info.version, info.ext
     ));
-    let (sys, mut bss) = loader(info, log)?;
-    if bss.len() < SECTOR {
-        return Err("ldlinux.bss is too small".into());
+    let (img, bss) = padded_loader(info, log)?;
+    let (bs, kind) = read_bootsect(vol)?;
+    if kind != VolumeKind::Fat {
+        return Err("Syslinux install: not a FAT volume".into());
     }
-    let mut bs = [0u8; SECTOR];
-    vol.seek(SeekFrom::Start(0)).map_err(e)?;
-    vol.read_exact(&mut bs).map_err(e)?;
-    check_bootsect(&bs).map_err(|m| format!("Syslinux install: {m}"))?;
-
-    // Upstream's installer pads the image to whole sectors so the ADV is sector-aligned.
-    let mut img = sys;
-    img.resize(img.len().div_ceil(SECTOR) * SECTOR, 0);
     {
         vol.seek(SeekFrom::Start(0)).map_err(e)?;
         let fs = fatfs::FileSystem::new(&mut *vol, fatfs::FsOptions::new()).map_err(e)?;
@@ -541,8 +669,7 @@ pub fn install<F: Read + Write + Seek>(
         drop(f);
         fs.unmount().map_err(e)?;
     }
-    let want = (img.len() + 2 * ADV_SIZE).div_ceil(SECTOR);
-    let (entry, sectors) = crate::fat::root_file(vol, b"LDLINUX SYS", want)
+    let (entry, sectors) = crate::fat::root_file(vol, b"LDLINUX SYS", ldlinux_sectors(&img))
         .map_err(e)?
         .ok_or("ldlinux.sys not found after writing it")?;
 
@@ -554,25 +681,188 @@ pub fn install<F: Read + Write + Seek>(
     vol.seek(SeekFrom::Start(entry + 11)).map_err(e)?;
     vol.write_all(&attr).map_err(e)?;
 
-    let subdir = match info.cfg_path.rfind('/') {
-        Some(i) if i > 0 => &info.cfg_path[..i],
-        _ => info.cfg_path.as_str(),
-    };
-    patch(&mut img, &mut bss, &sectors, subdir)?;
-    for (chunk, &s) in img.chunks(SECTOR).zip(&sectors) {
-        vol.seek(SeekFrom::Start(s * SECTOR as u64)).map_err(e)?;
-        vol.write_all(chunk).map_err(e)?;
-    }
+    let staged = Staged { img, bss, sectors };
+    write_patched(vol, info, staged, bs, kind, log)
+}
 
-    // syslinux_make_bootsect: jump + OEM name and the code area from the .bss, BPB kept.
-    bs[..11].copy_from_slice(&bss[..11]);
-    bs[90..510].copy_from_slice(&bss[90..510]);
-    vol.seek(SeekFrom::Start(0)).map_err(e)?;
-    vol.write_all(&bs).map_err(e)?;
-    vol.flush().map_err(e)?;
-    vol.seek(SeekFrom::Start(0)).map_err(e)?;
-    log("Successfully wrote Syslinux boot record".into());
-    Ok(())
+/// First step of installing Syslinux on a volume Rustfus can't write itself
+/// (NTFS): writes ldlinux.sys under the mounted `root` and maps its sectors.
+/// Finish with [`install_staged`] once the volume is unmounted.
+pub fn stage(root: &Path, info: &Info, log: &dyn Fn(String)) -> Result<Staged, String> {
+    let e = |err: io::Error| format!("Syslinux install: {err}");
+    log(format!(
+        "Installing Syslinux {}{}...",
+        info.version, info.ext
+    ));
+    let (img, bss) = padded_loader(info, log)?;
+    let path = root.join("ldlinux.sys");
+    // A read-only copy from an earlier run can't be opened for writing.
+    std::fs::remove_file(&path).ok();
+    let mut f = File::create(&path).map_err(e)?;
+    f.write_all(&img).map_err(e)?;
+    f.write_all(&empty_adv()).map_err(e)?;
+    f.sync_all().map_err(e)?;
+    let sectors = file_sectors(&f, ldlinux_sectors(&img))
+        .map_err(|err| format!("Syslinux install: can't map ldlinux.sys: {err}"))?;
+    drop(f);
+    // Like Rufus' read-only attribute: keeps the mapped sectors where they are.
+    if let Ok(meta) = std::fs::metadata(&path) {
+        let mut perms = meta.permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&path, perms).ok();
+    }
+    Ok(Staged { img, bss, sectors })
+}
+
+/// Patches the ldlinux.sys written by [`stage`] in place and writes the
+/// Syslinux boot sector, on the unmounted volume `vol`.
+pub fn install_staged<F: Read + Write + Seek>(
+    vol: &mut F,
+    info: &Info,
+    staged: Staged,
+    log: &dyn Fn(String),
+) -> Result<(), String> {
+    let (bs, kind) = read_bootsect(vol)?;
+    write_patched(vol, info, staged, bs, kind, log)
+}
+
+/// The first `want` 512-byte sectors of `f`, relative to the start of its
+/// volume, found like Syslinux' sectmap: FIEMAP, else FIBMAP (ntfs-3g).
+#[cfg(target_os = "linux")]
+fn file_sectors(f: &File, want: usize) -> io::Result<Vec<u64>> {
+    fiemap(f, want).or_else(|fiemap_err| {
+        fibmap(f, want)
+            .map_err(|fibmap_err| io::Error::other(format!("{fiemap_err}; FIBMAP: {fibmap_err}")))
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn file_sectors(_f: &File, _want: usize) -> io::Result<Vec<u64>> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
+#[cfg(target_os = "linux")]
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+struct FiemapExtent {
+    logical: u64,
+    physical: u64,
+    length: u64,
+    reserved64: [u64; 2],
+    flags: u32,
+    reserved: [u32; 3],
+}
+
+#[cfg(target_os = "linux")]
+const FIEMAP_EXTENTS: usize = 32;
+
+/// `struct fiemap` from linux/fiemap.h with room for FIEMAP_EXTENTS extents.
+#[cfg(target_os = "linux")]
+#[repr(C)]
+struct Fiemap {
+    start: u64,
+    length: u64,
+    flags: u32,
+    mapped_extents: u32,
+    extent_count: u32,
+    reserved: u32,
+    extents: [FiemapExtent; FIEMAP_EXTENTS],
+}
+
+#[cfg(target_os = "linux")]
+fn fiemap(f: &File, want: usize) -> io::Result<Vec<u64>> {
+    use std::os::fd::AsRawFd;
+    const FS_IOC_FIEMAP: u32 = 0xc020_660b;
+    const FIEMAP_FLAG_SYNC: u32 = 0x1;
+    const FIEMAP_EXTENT_LAST: u32 = 0x1;
+    // UNKNOWN, DELALLOC, ENCODED, NOT_ALIGNED, DATA_INLINE, DATA_TAIL, UNWRITTEN:
+    // no stable sectors a boot loader could read.
+    const UNMAPPABLE: u32 = 0x2 | 0x4 | 0x8 | 0x100 | 0x200 | 0x400 | 0x800;
+
+    let len = (want * SECTOR) as u64;
+    let mut sectors: Vec<u64> = Vec::with_capacity(want);
+    while sectors.len() < want {
+        let mut map = Fiemap {
+            start: (sectors.len() * SECTOR) as u64,
+            length: len - (sectors.len() * SECTOR) as u64,
+            flags: FIEMAP_FLAG_SYNC,
+            mapped_extents: 0,
+            extent_count: FIEMAP_EXTENTS as u32,
+            reserved: 0,
+            extents: [FiemapExtent::default(); FIEMAP_EXTENTS],
+        };
+        // SAFETY: `map` is a valid, exclusively borrowed `struct fiemap` whose
+        // `extent_count` matches its trailing array, and the fd outlives the call.
+        if unsafe { libc::ioctl(f.as_raw_fd(), FS_IOC_FIEMAP as _, &mut map as *mut Fiemap) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        let mapped = &map.extents[..(map.mapped_extents as usize).min(FIEMAP_EXTENTS)];
+        if mapped.is_empty() {
+            break;
+        }
+        for x in mapped {
+            if x.flags & UNMAPPABLE != 0 || !x.physical.is_multiple_of(SECTOR as u64) {
+                return Err(io::Error::other("ldlinux.sys has an unmappable extent"));
+            }
+            if x.logical != (sectors.len() * SECTOR) as u64 {
+                return Err(io::Error::other("ldlinux.sys has a hole"));
+            }
+            let count = (x.length / SECTOR as u64).min((want - sectors.len()) as u64);
+            sectors.extend((0..count).map(|k| x.physical / SECTOR as u64 + k));
+        }
+        if mapped
+            .last()
+            .is_some_and(|x| x.flags & FIEMAP_EXTENT_LAST != 0)
+        {
+            break;
+        }
+    }
+    if sectors.len() < want {
+        return Err(io::Error::other("ldlinux.sys is not fully allocated"));
+    }
+    Ok(sectors)
+}
+
+#[cfg(target_os = "linux")]
+fn fibmap(f: &File, want: usize) -> io::Result<Vec<u64>> {
+    use std::os::fd::AsRawFd;
+    const FIBMAP: u32 = 1;
+    const FIGETBSZ: u32 = 2;
+
+    let mut block_size: libc::c_int = 0;
+    // SAFETY: FIGETBSZ writes one int through the pointer, which is valid and
+    // exclusively borrowed, and the fd outlives the call.
+    if unsafe {
+        libc::ioctl(
+            f.as_raw_fd(),
+            FIGETBSZ as _,
+            &mut block_size as *mut libc::c_int,
+        )
+    } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    let block_size = block_size as usize;
+    if block_size < SECTOR || !block_size.is_multiple_of(SECTOR) {
+        return Err(io::Error::other(format!("odd block size {block_size}")));
+    }
+    let per_block = block_size / SECTOR;
+    let mut sectors: Vec<u64> = Vec::with_capacity(want);
+    for index in 0..want.div_ceil(per_block) {
+        let mut block = libc::c_int::try_from(index).map_err(io::Error::other)?;
+        // SAFETY: FIBMAP reads and overwrites one int through the pointer, which
+        // is valid and exclusively borrowed, and the fd outlives the call.
+        if unsafe { libc::ioctl(f.as_raw_fd(), FIBMAP as _, &mut block as *mut libc::c_int) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        if block <= 0 {
+            return Err(io::Error::other("ldlinux.sys has a hole"));
+        }
+        let first = block as u64 * per_block as u64;
+        let count = per_block.min(want - sectors.len()) as u64;
+        sectors.extend(first..first + count);
+    }
+    Ok(sectors)
 }
 
 #[cfg(test)]

@@ -308,7 +308,7 @@ pub fn fix_dot_entries<D: Read + Write + Seek>(dev: &mut D) -> io::Result<()> {
                 dev.write_all(&fixed)?;
             }
         }
-        for e in raw.chunks_exact(32) {
+        for e in raw.as_chunks::<32>().0 {
             if e[0] == 0 {
                 break;
             }
@@ -357,7 +357,7 @@ pub fn root_file<D: Read + Seek>(
             c = l.next(dev, cl)?;
         }
     }
-    for (i, e) in raw.chunks_exact(32).enumerate() {
+    for (i, e) in raw.as_chunks::<32>().0.iter().enumerate() {
         if e[0] == 0 {
             break;
         }

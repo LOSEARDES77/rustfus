@@ -37,7 +37,10 @@ builds compile cleanly but have not been run on those systems.
 | Linux ISO, UEFI boot | 🟢 | 🟢 | 🟢 | |
 | Linux ISO, BIOS boot via GRUB 2 | 🟢 | 🟢 | 🟢 | embedded core.img 2.14 |
 | GRUB version download (signed, rufus.ie) | 🟢 | 🟢 | 🟢 | needs `curl` (built into Windows 10+/macOS) |
-| Linux ISO, BIOS boot via Syslinux | 🟢 | 🟢 | 🟢 | embedded v4/v6, others downloaded (signed) |
+| Linux ISO, BIOS boot via Syslinux, FAT32 | 🟢 | 🟢 | 🟢 | embedded v4/v6, others downloaded (signed) |
+| Linux ISO, BIOS boot via Syslinux, NTFS | 🟡 | 🔴 | 🔴 | Syslinux 6+ only, like Rufus; Linux needs `mkfs.ntfs` and maps ldlinux.sys with FIEMAP (ntfs3) or FIBMAP (ntfs-3g) |
+| Linux ISO, BIOS boot via Syslinux, exFAT | 🔴 | 🔴 | 🔴 | refused: Syslinux has no exFAT driver (GRUB 2 images fall back to GRUB) |
+| Knoppix `/boot/syslinux` symlink (EFI Syslinux configs) | 🟢 | 🟢 | 🟢 | replaced by a directory of `syslnx32/64.cfg` redirects, like Rufus |
 | Persistent partition (Ubuntu / Debian live) | 🟢 | 🟢 | 🟢 | own ext3 formatter |
 | Runtime UEFI media validation (uefi-md5sum) | 🟢 | 🟢 | 🟢 | |
 | FreeDOS | 🟢 | 🟢 | 🟢 | |
@@ -67,5 +70,5 @@ builds compile cleanly but have not been run on those systems.
 | Log, About, dark mode | 🟢 | 🟢 | 🟢 | |
 | Drag and drop images | 🟢 | 🟢 | 🟢 | |
 | Windows ISO download (Fido) | 🟢 | 🟢 | 🟢 | Runs Fido.ps1 when PowerShell (`pwsh`) is installed, else built-in |
-| Update check | 🔴 | 🔴 | 🔴 | not implemented |
+| Update check (GitHub releases) | 🟢 | 🟢 | 🟢 | asks on first launch; daily/weekly/monthly, optional betas; needs `curl` |
 | Runs without root / Administrator | 🔴 | 🔴 | 🔴 | raw disk access needs elevation |

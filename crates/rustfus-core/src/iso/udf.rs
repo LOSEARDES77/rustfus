@@ -41,8 +41,10 @@ pub(super) fn cs0(b: &[u8]) -> String {
     match b.split_first() {
         Some((8 | 254, r)) => r.iter().map(|&c| c as char).collect(),
         Some((16 | 255, r)) => String::from_utf16_lossy(
-            &r.chunks_exact(2)
-                .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            &r.as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| u16::from_be_bytes(*c))
                 .collect::<Vec<_>>(),
         ),
         _ => String::new(),
