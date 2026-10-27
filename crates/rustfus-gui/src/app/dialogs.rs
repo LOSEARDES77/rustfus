@@ -7,7 +7,7 @@ use super::{App, Dialog};
 use crate::widgets::{ok_cancel, os_window, rufus_style};
 use eframe::egui::{self, Color32};
 use rustfus_core::loc::{t, tf};
-use rustfus_core::ops::Msg;
+use rustfus_core::ops::{self, Msg};
 use rustfus_core::{drives, fido, net};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -47,6 +47,31 @@ impl App {
                     });
                 });
             }
+            Dialog::ReplaceC32(i) => {
+                let i = *i;
+                let old_c32 = ops::obsolete_c32(&self.report, self.fs, self.scheme, self.target);
+                let replace = &mut self.replace_c32;
+                let path = &old_c32[i];
+                let name = path.rsplit('/').next().unwrap_or(path);
+                modal("replace_c32", &mut |ui| {
+                    ui.heading(tf("MSG_083", &[name]));
+                    ui.label(tf("MSG_084", &[name, name]));
+                    ui.horizontal(|ui| {
+                        let yes = ui.button(t("MSG_008")).clicked();
+                        let no = ui.button(t("MSG_009")).clicked();
+                        if yes {
+                            replace.push(path.clone());
+                        }
+                        if yes || no {
+                            if i + 1 < old_c32.len() {
+                                next = Some(Dialog::ReplaceC32(i + 1));
+                            } else {
+                                stage = Some(2);
+                            }
+                        }
+                    });
+                });
+            }
             Dialog::Edition => {
                 let (eds, sel) = (&self.editions, &mut self.edition);
                 modal("edition", &mut |ui| {
@@ -57,7 +82,7 @@ impl App {
                     }
                     if let Some(ok) = ok_cancel(ui) {
                         if ok {
-                            stage = Some(2)
+                            stage = Some(3)
                         } else {
                             next = Some(Dialog::None)
                         }

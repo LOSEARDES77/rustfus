@@ -16,7 +16,9 @@ First public release. Untested on physical drives; see the README.
 - ISO mode for ISO9660/Joliet/Rock Ridge/UDF images onto FAT32, NTFS or exFAT.
 - Windows install media: UEFI and BIOS boot, UEFI:NTFS, Windows User Experience
   options, Windows To Go.
-- Linux live media: GRUB 2 and Syslinux, persistent partitions.
+- Linux live media: GRUB 2 and Syslinux, persistent partitions. Like Rufus,
+  replacing an image's obsolete `menu.c32`/`vesamenu.c32` asks first (or needs
+  `--allow-downloads` on the command line).
 - FreeDOS, bad blocks check, checksums, runtime UEFI media validation.
 - Built-in MBR/GPT, FAT16/FAT32 and ext2/3/4 formatters.
 - Windows ISO download through Fido, with or without PowerShell.

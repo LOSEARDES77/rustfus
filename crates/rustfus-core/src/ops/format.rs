@@ -41,7 +41,7 @@ pub(super) fn write_fat(
         let dest = Dest::Fat(&fat);
         copy_files(job, rep, iso, &dest, ctx)?;
         if let (Some(iso), Some(sl)) = (iso, sl) {
-            for (path, data) in syslinux::extra_files(iso, sl, &|m| ctx.log(m))? {
+            for (path, data) in syslinux::extra_files(iso, sl, &job.replace_c32, &|m| ctx.log(m))? {
                 dest.put(&path, &data).map_err(e)?;
             }
         }

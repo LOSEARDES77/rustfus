@@ -225,6 +225,22 @@ fn write(a: WriteArgs) -> Result<(), String> {
             report.grub2_version
         );
     }
+    let old_c32: &[String] = if iso_mode {
+        ops::obsolete_c32(&report, fs, scheme, target)
+    } else {
+        &[]
+    };
+    if !old_c32.is_empty() && !a.allow_downloads {
+        eprintln!(
+            "WARNING: the image uses an obsolete {}; add --allow-downloads to replace it or boot menus may not display properly",
+            old_c32.join(", ")
+        );
+    }
+    let replace_c32 = if a.allow_downloads {
+        old_c32.to_vec()
+    } else {
+        Vec::new()
+    };
     let label = a.label.unwrap_or_else(|| {
         if iso_mode {
             report.label.clone()
@@ -258,6 +274,7 @@ fn write(a: WriteArgs) -> Result<(), String> {
             wtg_no_internal: has(WueArg::WtgNoInternal) && a.wtg.is_some(),
         },
         allow_downloads: a.allow_downloads,
+        replace_c32,
         wtg: a.wtg,
         drive,
     };
