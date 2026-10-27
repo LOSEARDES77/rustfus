@@ -1,6 +1,6 @@
 use super::dd::{copy, verify_dev};
 use super::files::{patch_label, patch_persistence};
-use super::format::write_fat;
+use super::format::{syslinux_for, write_fat};
 use super::layout::{layout, write_tables};
 use super::*;
 use crate::{bootrec, syslinux};
@@ -235,6 +235,130 @@ fn syslinux_iso_mode_to_fat32_image() {
         .unwrap();
     assert!(cfg.contains("CONFIG /isolinux/isolinux.cfg"));
     assert!(fat.root_dir().open_file("ldlinux.sys").is_ok());
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn syslinux_filesystem_gating() {
+    let drive = Drive {
+        path: "x".into(),
+        name: "x".into(),
+        size: 1000 * MB,
+    };
+    let mut job = test_job(drive, PathBuf::from("x.iso"));
+    let rep = Report::default();
+    let installs = |job: &Job, rep: &Report, major: u8| {
+        let sl = syslinux::Info {
+            major,
+            minor: 3,
+            version: format!("{major}.03"),
+            ext: String::new(),
+            cfg_path: "/isolinux/isolinux.cfg".into(),
+            overwrite_cfg: false,
+            reactos: None,
+            old_c32: Vec::new(),
+        };
+        syslinux_for(job, rep, Some(sl)).map(|s| s.is_some())
+    };
+
+    assert_eq!(installs(&job, &rep, 4), Ok(true));
+    job.fs = Fs::Ntfs;
+    assert_eq!(
+        installs(&job, &rep, 6).is_ok_and(|yes| yes),
+        cfg!(target_os = "linux")
+    );
+    let err = installs(&job, &rep, 4).unwrap_err();
+    assert!(err.contains("can't boot from NTFS"), "{err}");
+    job.fs = Fs::Exfat;
+    let err = installs(&job, &rep, 6).unwrap_err();
+    assert!(err.contains("exFAT"), "{err}");
+
+    // GRUB 2 can BIOS-boot the image instead, and UEFI never needs Syslinux.
+    let grub = Report {
+        grub2: true,
+        ..Report::default()
+    };
+    assert_eq!(installs(&job, &grub, 6), Ok(false));
+    job.target = Target::Uefi;
+    assert_eq!(installs(&job, &rep, 6), Ok(false));
+    job.target = Target::Bios;
+    job.fs = Fs::Ext4;
+    assert_eq!(installs(&job, &rep, 6), Ok(false));
+}
+
+/// Knoppix' /boot/syslinux symlink becomes a directory of EFI redirect configs.
+#[cfg(unix)]
+#[test]
+fn knoppix_symlink_workaround() {
+    let dir = std::env::temp_dir().join(format!("rustfus-knoppix-{}", std::process::id()));
+    let tree = dir.join("tree");
+    std::fs::create_dir_all(tree.join("boot/isolinux")).unwrap();
+    let mut bin = vec![0u8; 4096];
+    let v = b"ISOLINUX 6.04 pre1\0";
+    bin[1000..1000 + v.len()].copy_from_slice(v);
+    std::fs::write(tree.join("boot/isolinux/isolinux.bin"), &bin).unwrap();
+    std::fs::write(tree.join("boot/isolinux/isolinux.cfg"), "DEFAULT linux\n").unwrap();
+    std::fs::write(tree.join("boot/isolinux/syslnx64.cfg"), "DEFAULT efi\n").unwrap();
+    std::os::unix::fs::symlink("isolinux", tree.join("boot/syslinux")).unwrap();
+    let iso_path = dir.join("knoppix.iso");
+    let ok = std::process::Command::new("xorriso")
+        .args([
+            "-as", "mkisofs", "-quiet", "-R", "-J", "-V", "KNOPPIX", "-o",
+        ])
+        .arg(&iso_path)
+        .arg(&tree)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !ok {
+        return;
+    }
+    let devp = dir.join("disk.img");
+    let size = 64 * MB;
+    File::create(&devp).unwrap().set_len(size).unwrap();
+    let rep = analyze(&iso_path).unwrap();
+    let iso = iso::Iso::open(&iso_path).unwrap();
+    let drive = Drive {
+        path: devp.to_string_lossy().into(),
+        name: "img".into(),
+        size,
+    };
+    let mut job = test_job(drive, iso_path);
+    job.uefi_validation = false;
+    job.target = Target::Uefi;
+    let (tx, cancel) = ctx_parts();
+    let ctx = Ctx {
+        tx: &tx,
+        cancel: &cancel,
+    };
+    let parts = layout(&job, false);
+    let dev = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&devp)
+        .unwrap();
+    write_tables(&job, &rep, None, &parts, &dev, &ctx).unwrap();
+    write_fat(&job, &rep, Some(&iso), None, &parts[0], &dev, &ctx).unwrap();
+
+    let raw = std::fs::read(&devp).unwrap();
+    let p = &raw[parts[0].start as usize..(parts[0].start + parts[0].size) as usize];
+    let mut f = Cursor::new(p.to_vec());
+    let fat = fatfs::FileSystem::new(&mut f, fatfs::FsOptions::new()).unwrap();
+    let mut cfg = String::new();
+    fat.root_dir()
+        .open_file("boot/syslinux/syslnx64.cfg")
+        .unwrap()
+        .read_to_string(&mut cfg)
+        .unwrap();
+    assert_eq!(
+        cfg,
+        "DEFAULT loadconfig\n\nLABEL loadconfig\n  CONFIG /boot/isolinux/syslnx64.cfg\n  APPEND /boot/isolinux\n"
+    );
+    assert!(
+        fat.root_dir()
+            .open_file("boot/syslinux/syslnx32.cfg")
+            .is_err()
+    );
+    drop(fat);
     std::fs::remove_dir_all(dir).ok();
 }
 

@@ -37,7 +37,10 @@ builds compile cleanly but have not been run on those systems.
 | Linux ISO, UEFI boot | 🟢 | 🟢 | 🟢 | |
 | Linux ISO, BIOS boot via GRUB 2 | 🟢 | 🟢 | 🟢 | embedded core.img 2.14 |
 | GRUB version download (signed, rufus.ie) | 🟢 | 🟢 | 🟢 | needs `curl` (built into Windows 10+/macOS) |
-| Linux ISO, BIOS boot via Syslinux | 🟢 | 🟢 | 🟢 | embedded v4/v6, others downloaded (signed) |
+| Linux ISO, BIOS boot via Syslinux, FAT32 | 🟢 | 🟢 | 🟢 | embedded v4/v6, others downloaded (signed) |
+| Linux ISO, BIOS boot via Syslinux, NTFS | 🟡 | 🔴 | 🔴 | Syslinux 6+ only, like Rufus; Linux needs `mkfs.ntfs` and maps ldlinux.sys with FIEMAP (ntfs3) or FIBMAP (ntfs-3g) |
+| Linux ISO, BIOS boot via Syslinux, exFAT | 🔴 | 🔴 | 🔴 | refused: Syslinux has no exFAT driver (GRUB 2 images fall back to GRUB) |
+| Knoppix `/boot/syslinux` symlink (EFI Syslinux configs) | 🟢 | 🟢 | 🟢 | replaced by a directory of `syslnx32/64.cfg` redirects, like Rufus |
 | Persistent partition (Ubuntu / Debian live) | 🟢 | 🟢 | 🟢 | own ext3 formatter |
 | Runtime UEFI media validation (uefi-md5sum) | 🟢 | 🟢 | 🟢 | |
 | FreeDOS | 🟢 | 🟢 | 🟢 | |
