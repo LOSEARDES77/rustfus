@@ -17,6 +17,8 @@ First public release. Untested on physical drives; see the README.
 - Windows install media: UEFI and BIOS boot, UEFI:NTFS, Windows User Experience
   options, Windows To Go.
 - Linux live media: GRUB 2 and Syslinux, persistent partitions.
+- Syslinux 6+ on NTFS (Linux), the Knoppix EFI symlink workaround, and a clear
+  refusal when only Syslinux could BIOS-boot an image from exFAT or old-Syslinux NTFS.
 - FreeDOS, bad blocks check, checksums, runtime UEFI media validation.
 - Built-in MBR/GPT, FAT16/FAT32 and ext2/3/4 formatters.
 - Windows ISO download through Fido, with or without PowerShell.
