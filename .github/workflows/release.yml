@@ -225,4 +225,4 @@ jobs:
         run: |
           prerelease=""; [[ "${GITHUB_REF_NAME}" == *-* ]] && prerelease="--prerelease"
           gh release create "${GITHUB_REF_NAME}" dist/* --title "Rustfus ${GITHUB_REF_NAME}" --generate-notes $prerelease \
-            --notes "Untested on physical drives: see README.md. Writing disks needs root/Administrator. Third-party GPL sources are in the *-third-party-sources.tar asset."
+            --notes "Writing disks needs root/Administrator. Third-party GPL sources are in the *-third-party-sources.tar asset."

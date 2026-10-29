@@ -3,8 +3,8 @@
 🟢 works &nbsp;&nbsp; 🟡 partial / needs an extra tool &nbsp;&nbsp; 🔴 not available
 
 "Works" means implemented and covered by automated tests on disk-image files.
-Nothing has been tested on a physical USB drive yet, and the Windows and macOS
-builds compile cleanly but have not been run on those systems.
+The Windows and macOS builds compile cleanly but have not been run on those
+systems.
 
 ## Drives and images
 

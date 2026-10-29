@@ -6,7 +6,7 @@ All notable changes to Rustfus are listed here. The format follows
 
 ## [0.1.0] - Unreleased
 
-First public release. Untested on physical drives; see the README.
+First public release.
 
 ### Added
 

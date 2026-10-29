@@ -5,8 +5,8 @@ Every Rufus feature, and whether Rustfus has it on each platform.
 🟢 implemented &nbsp;&nbsp; 🟡 partial / needs an extra tool &nbsp;&nbsp; 🔴 not available
 
 "Implemented" means the code exists and is covered by automated tests on
-disk-image files. Nothing has been tested on a physical USB drive yet, and the
-Windows and macOS builds compile but have not been run on those systems.
+disk-image files. The Windows and macOS builds compile but have not been run
+on those systems.
 [COMPATIBILITY.md](COMPATIBILITY.md) has the same data grouped by what
 Rustfus itself does.
 
