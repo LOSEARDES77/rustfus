@@ -19,7 +19,7 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tag must match Cargo.toml version
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -48,7 +48,7 @@ jobs:
           - { os: windows-11-arm, target: aarch64-pc-windows-msvc, arch: aarch64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -59,7 +59,7 @@ jobs:
         run: |
           mkdir dist
           cp "target/${{ matrix.target }}/release/rustfus.exe" "dist/Rustfus-${GITHUB_REF_NAME}-windows-${{ matrix.arch }}.exe"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-windows-${{ matrix.arch }}
           path: dist/*
@@ -69,7 +69,7 @@ jobs:
     needs: test
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -111,7 +111,7 @@ jobs:
           ln -s /Applications build/Applications
           hdiutil create -volname "Rustfus ${version}" -srcfolder build -ov -format UDZO \
             "dist/Rustfus-${GITHUB_REF_NAME}-macos-universal.dmg"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-macos
           path: dist/*
@@ -128,7 +128,7 @@ jobs:
           - { os: ubuntu-22.04-arm, target: aarch64-unknown-linux-gnu, arch: aarch64 }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -147,12 +147,12 @@ jobs:
           cargo generate-rpm -p crates/rustfus-cli --target ${{ matrix.target }} -s "version = \"$rpm_version\"" -o dist/
           packaging/appimage.sh "target/${{ matrix.target }}/release/rustfus" "$version" ${{ matrix.arch }} dist
           ls -la dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-linux-${{ matrix.arch }}
           path: target/${{ matrix.target }}/release/rustfus
@@ -163,8 +163,8 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: bin-linux-x86_64
           path: bin
@@ -178,7 +178,7 @@ jobs:
           chmod 755 bin/rustfus
           su builder -c "cd /tmp/arch && REPO='$PWD' BIN='$PWD/bin/rustfus' makepkg --nodeps"
           cp /tmp/arch/*.pkg.tar.zst dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-arch
           path: dist/*
@@ -188,7 +188,7 @@ jobs:
   sources:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download upstream sources listed in res/SOURCES.txt
         run: |
           dir="rustfus-${GITHUB_REF_NAME}-third-party-sources"
@@ -201,7 +201,7 @@ jobs:
           for f in res/*/readme.txt; do cp "$f" "$dir/$(basename "$(dirname "$f")")-readme.txt"; done
           tar cf "dist/$dir.tar" "$dir"
           cp LICENSE THIRD_PARTY_NOTICES.md dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-sources
           path: dist/*
@@ -211,7 +211,7 @@ jobs:
     needs: [windows, macos, linux, arch, sources]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: pkg-*
           path: dist
