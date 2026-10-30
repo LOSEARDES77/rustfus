@@ -116,6 +116,9 @@ includes its file with `#[path]`, so tests can reach private functions.
 Some tests use `xorriso`, `fsck.vfat`, `e2fsprogs`, `sfdisk` or `qemu-img`
 when available and skip themselves otherwise.
 
+Tests on real USB drives and firmware follow
+[docs/MANUAL_TESTING.md](docs/MANUAL_TESTING.md).
+
 ## Releases
 
 Pushing a version tag builds, tests and publishes a GitHub release
