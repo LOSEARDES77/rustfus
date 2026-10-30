@@ -197,12 +197,31 @@ mod imp {
         number: u32,
         friendly_name: Option<String>,
         size: u64,
-        bus_type: u16,
+        bus_type: BusType,
         is_system: bool,
         is_boot: bool,
         label: Option<String>,
         letter: Option<String>,
         serial_number: Option<String>,
+    }
+
+    // Some Windows versions serialize BusType as its enum name ("USB", "SAS")
+    // instead of its numeric code.
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum BusType {
+        Code(u16),
+        Name(String),
+    }
+
+    impl BusType {
+        // 7 = USB, 12 = SD, 13 = MMC
+        fn is_removable(&self) -> bool {
+            match self {
+                BusType::Code(c) => matches!(c, 7 | 12 | 13),
+                BusType::Name(n) => matches!(n.as_str(), "USB" | "SD" | "MMC"),
+            }
+        }
     }
 
     // BusType 7 already covers USB hard drives, and internal SATA/NVMe disks
@@ -219,11 +238,10 @@ mod imp {
             ],
         )?;
         let disks: Vec<Disk> = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        // BusType: 7 = USB, 12 = SD, 13 = MMC
         Ok(disks
             .into_iter()
             .filter(|d| !d.is_system && !d.is_boot && d.size > 0)
-            .filter(|d| matches!(d.bus_type, 7 | 12 | 13))
+            .filter(|d| d.bus_type.is_removable())
             .map(|d| {
                 let name = d
                     .label
