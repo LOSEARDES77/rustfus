@@ -44,6 +44,15 @@ pub(super) fn shell() -> Option<String> {
         .map(|p| p.to_string_lossy().into_owned())
 }
 
+/// PowerShell process without the parent's `PSModulePath`: one inherited from
+/// PowerShell 7 points Windows PowerShell 5.1 at modules it cannot load (such as
+/// `Microsoft.PowerShell.Security`, home of `Get-AuthenticodeSignature`).
+fn command(shell: &str) -> Command {
+    let mut c = Command::new(shell);
+    c.env_remove("PSModulePath");
+    c
+}
+
 /// Writes the signature-checked script where PowerShell runs it from. It is
 /// rewritten before every run, so what runs is what was verified.
 fn script_file(shell: &str) -> Result<PathBuf, String> {
@@ -76,7 +85,7 @@ fn authenticode(shell: &str, path: &std::path::Path) -> Result<(), String> {
     CHECKED
         .get_or_init(|| {
             let p = path.to_string_lossy().replace('\'', "''");
-            let out = Command::new(shell)
+            let out = command(shell)
                 .args(["-NoProfile", "-NonInteractive", "-Command"])
                 .arg(format!(
                     "$s = Get-AuthenticodeSignature -LiteralPath '{p}'; \
@@ -87,6 +96,10 @@ fn authenticode(shell: &str, path: &std::path::Path) -> Result<(), String> {
                 .map_err(|e| format!("PowerShell: {e}"))?;
             match String::from_utf8_lossy(&out.stdout).trim() {
                 "OK" => Ok(()),
+                "" => Err(format!(
+                    "Fido.ps1 Authenticode check failed: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                )),
                 s => Err(format!("Fido.ps1 Authenticode signature is not valid: {s}")),
             }
         })
@@ -134,7 +147,7 @@ fn run(shell: &str, extra: &[String]) -> Result<(bool, String), String> {
         "x86" => "x86",
         _ => "x64",
     };
-    let out = Command::new(shell)
+    let out = command(shell)
         .args([
             "-NoProfile",
             "-NonInteractive",
