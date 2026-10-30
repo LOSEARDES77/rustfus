@@ -8,7 +8,6 @@ fn rejects_bad_signature() {
 
 /// Network test: run with `cargo test net_live -- --ignored`.
 #[test]
-#[ignore]
 fn net_live_grub_core_img_is_signed() {
     let url = format!("{FILES_URL}/grub-2.06/core.img");
     let data = fetch(&url).unwrap();

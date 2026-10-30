@@ -54,7 +54,6 @@ fn fido_native_live() {
 
 /// Network test through PowerShell, when installed: `cargo test fido_pwsh_live -- --ignored`.
 #[test]
-#[ignore]
 fn fido_pwsh_live() {
     let Some(sh) = pwsh::shell() else { return };
     let c = walk(|c| pwsh::list(&sh, c), ["UEFI Shell 2.2", "", "", "", ""]);

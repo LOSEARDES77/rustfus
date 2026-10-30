@@ -245,7 +245,6 @@ fn old_c32_kept_unless_approved() {
 }
 
 #[test]
-#[ignore]
 fn download_6_03() {
     let info = super::info(0x603, "/2014-10-06".into());
     let (sys, bss) = loader(

@@ -112,7 +112,6 @@ fn checks_when_due() {
 
 /// Network test: run with `cargo test net_live -- --ignored`.
 #[test]
-#[ignore]
 fn net_live_github_releases() {
     check(true).unwrap();
 }
