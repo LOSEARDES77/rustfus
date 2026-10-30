@@ -430,6 +430,8 @@ fn open_dev(d: &Drive) -> Result<File, String> {
 
 /// Releases every mounted volume on the drive so raw writes are allowed.
 pub fn unmount(d: &Drive) -> Result<(), String> {
+    // Every write path starts here, so this is the last moment to catch a swapped drive.
+    crate::drives::verify(d)?;
     #[cfg(target_os = "linux")]
     {
         let out = run("lsblk", &["-ln", "-o", "PATH,MOUNTPOINT", &d.path])?;

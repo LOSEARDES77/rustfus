@@ -126,6 +126,7 @@ fn layout_places_extra_partitions_at_end() {
         path: "x".into(),
         name: "x".into(),
         size: 1000 * MB + 12345,
+        serial: None,
     };
     let mut job = test_job(drive, PathBuf::from("x.iso"));
     job.fs = Fs::Ntfs;
@@ -200,6 +201,7 @@ fn syslinux_iso_mode_to_fat32_image() {
         path: devp.to_string_lossy().into(),
         name: "img".into(),
         size,
+        serial: None,
     };
     let mut job = test_job(drive, iso_path);
     job.uefi_validation = false;
@@ -245,6 +247,7 @@ fn syslinux_filesystem_gating() {
         path: "x".into(),
         name: "x".into(),
         size: 1000 * MB,
+        serial: None,
     };
     let mut job = test_job(drive, PathBuf::from("x.iso"));
     let rep = Report::default();
@@ -350,6 +353,7 @@ fn knoppix_symlink_workaround() {
         path: devp.to_string_lossy().into(),
         name: "img".into(),
         size,
+        serial: None,
     };
     let mut job = test_job(drive, iso_path);
     job.uefi_validation = false;
@@ -429,6 +433,7 @@ fn iso_mode_to_fat32_image() {
         path: devp.to_string_lossy().into(),
         name: "img".into(),
         size,
+        serial: None,
     };
     let job = test_job(drive, iso_path);
     let (tx, cancel) = ctx_parts();
@@ -503,4 +508,16 @@ fn iso_mode_to_fat32_image() {
         );
     }
     std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn unmount_refuses_a_drive_that_is_gone() {
+    let drive = Drive {
+        path: "/dev/rustfus-missing".into(),
+        name: "x".into(),
+        size: MB,
+        serial: None,
+    };
+    let err = unmount(&drive).unwrap_err();
+    assert!(err.contains("no longer connected"), "{err}");
 }

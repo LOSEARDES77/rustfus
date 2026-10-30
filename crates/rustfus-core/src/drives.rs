@@ -8,6 +8,8 @@ pub struct Drive {
     pub path: String,
     pub name: String,
     pub size: u64,
+    /// Hardware serial, when the OS reports one (not on macOS).
+    pub serial: Option<String>,
 }
 
 impl Drive {
@@ -15,6 +17,23 @@ impl Drive {
     pub fn label(&self) -> String {
         format!("{} [{}]", self.name, marketed_size(self.size))
     }
+}
+
+/// Lists the drives again and checks `d` is still the same disk, so a stick
+/// swapped after it was picked is never written.
+pub fn verify(d: &Drive) -> Result<(), String> {
+    let now = list(true)?;
+    let Some(cur) = now.iter().find(|c| c.path == d.path) else {
+        return Err(format!("{} is no longer connected", d.path));
+    };
+    if cur.size != d.size || cur.serial != d.serial {
+        return Err(format!(
+            "{} is now a different drive ({}); select it again",
+            d.path,
+            cur.label()
+        ));
+    }
+    Ok(())
 }
 
 /// Drive capacity the way it is sold: decimal units, rounded.
@@ -80,6 +99,7 @@ mod imp {
         kind: String,
         mountpoints: Option<Vec<Option<String>>>,
         label: Option<String>,
+        serial: Option<String>,
         children: Option<Vec<Dev>>,
     }
 
@@ -105,7 +125,7 @@ mod imp {
                 // NAME keeps the output a tree: without it, newer lsblk
                 // (2.42) prints partitions flat, with no `children`, which
                 // hides the system mounts hosts_system() looks for.
-                "NAME,PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL",
+                "NAME,PATH,SIZE,MODEL,TRAN,RM,HOTPLUG,TYPE,MOUNTPOINTS,LABEL,SERIAL",
             ],
         )?;
         let l: Lsblk = serde_json::from_str(&json).map_err(|e| e.to_string())?;
@@ -127,6 +147,7 @@ mod imp {
                         .to_string(),
                     size: d.size.unwrap_or(0),
                     path: d.path,
+                    serial: d.serial,
                 }
             })
             .collect())
@@ -158,6 +179,7 @@ mod imp {
                 path: path.to_string(),
                 name: field("Device / Media Name:").unwrap_or_else(|| "Unknown".into()),
                 size,
+                serial: None,
             });
         }
         Ok(drives)
@@ -180,6 +202,7 @@ mod imp {
         is_boot: bool,
         label: Option<String>,
         letter: Option<String>,
+        serial_number: Option<String>,
     }
 
     // BusType 7 already covers USB hard drives, and internal SATA/NVMe disks
@@ -190,7 +213,7 @@ mod imp {
             &[
                 "-NoProfile",
                 "-Command",
-                "ConvertTo-Json -InputObject @(Get-Disk | Select-Object Number,FriendlyName,Size,BusType,IsSystem,IsBoot,\
+                "ConvertTo-Json -InputObject @(Get-Disk | Select-Object Number,FriendlyName,Size,BusType,IsSystem,IsBoot,SerialNumber,\
                  @{n='Label';e={($_ | Get-Partition -ErrorAction SilentlyContinue | Get-Volume -ErrorAction SilentlyContinue | Select-Object -First 1).FileSystemLabel}},\
                  @{n='Letter';e={[string](($_ | Get-Partition -ErrorAction SilentlyContinue | Where-Object DriveLetter | Select-Object -First 1).DriveLetter)}})",
             ],
@@ -216,6 +239,7 @@ mod imp {
                     path: format!(r"\\.\PhysicalDrive{}", d.number),
                     name: name + &letter,
                     size: d.size,
+                    serial: d.serial_number.map(|s| s.trim().to_string()),
                 }
             })
             .collect())
