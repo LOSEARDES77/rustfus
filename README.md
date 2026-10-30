@@ -13,7 +13,7 @@ I love Rufus, and I wanted a way to run it on Linux specifically. Every time
 I needed it, I ended up spinning up a Windows VM just to make a bootable USB.
 Rustfus saves me from doing that.
 
-> **This project was vibe coded.** It was written with an AI coding assistant
+> **This project is AI-assisted.** It was written with an AI coding assistant
 > (Claude Code), using the Rufus source code as the reference. It has
 > automated tests; the Windows and macOS builds compile but haven't been run
 > on those systems. Creating bootable media erases the selected drive: double-check
