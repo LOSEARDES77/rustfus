@@ -36,6 +36,8 @@ jobs:
           done
       # Optional tools some tests use to check the written images.
       - run: sudo apt-get update && sudo apt-get install -y xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
+      # fido_pwsh_live skips silently without PowerShell.
+      - run: command -v pwsh || sudo snap install powershell --classic
       - run: cargo test --workspace --locked
 
   # Cross clippy only proves the code compiles; this runs the tests on each OS.
@@ -53,6 +55,11 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # Windows uses its built-in powershell.exe.
+      - if: runner.os == 'Linux'
+        run: command -v pwsh || sudo snap install powershell --classic
+      - if: runner.os == 'macOS'
+        run: command -v pwsh || brew install --cask powershell
       - run: cargo test --workspace --locked
 
   # rust-version in Cargo.toml must keep building.
