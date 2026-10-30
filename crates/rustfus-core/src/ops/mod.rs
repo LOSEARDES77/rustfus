@@ -413,11 +413,19 @@ fn raw_path(d: &Drive) -> String {
 
 fn open_dev(d: &Drive) -> Result<File, String> {
     let dev = raw_path(d);
-    OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&dev)
-        .map_err(|err| format!("Cannot open {dev}: {err} (run as root/Administrator)"))
+    let mut opts = OpenOptions::new();
+    opts.read(true).write(true);
+    // O_EXCL on a block device makes the kernel refuse the open while any
+    // partition is still mounted or held by swap, LVM or RAID.
+    #[cfg(target_os = "linux")]
+    std::os::unix::fs::OpenOptionsExt::custom_flags(&mut opts, libc::O_EXCL);
+    opts.open(&dev).map_err(|err| {
+        #[cfg(target_os = "linux")]
+        if err.raw_os_error() == Some(libc::EBUSY) {
+            return format!("{dev} is in use (mounted, swap, LVM or RAID); release it and retry");
+        }
+        format!("Cannot open {dev}: {err} (run as root/Administrator)")
+    })
 }
 
 /// Releases every mounted volume on the drive so raw writes are allowed.
