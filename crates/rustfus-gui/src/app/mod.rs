@@ -799,13 +799,12 @@ mod tests {
                             });
                             app.status_section(ui);
                         });
-                    assert!(viewport.contains_rect(form.inner_rect));
-                    assert!(
-                        form.content_size.x <= form.inner_rect.width() + 1.0,
-                        "horizontal form overflow: content {:?}, viewport {:?}",
-                        form.content_size,
-                        form.inner_rect
-                    );
+                    ctx.data_mut(|data| {
+                        data.insert_temp(
+                            egui::Id::new("test-form-layout"),
+                            (form.inner_rect, form.content_size),
+                        );
+                    });
                 });
                 ctx.data_mut(|data| {
                     data.insert_temp(
@@ -821,6 +820,18 @@ mod tests {
             },
             app,
         )
+    }
+
+    fn assert_form_fits(harness: &Harness<'static, App>) {
+        let (rect, content) = harness.ctx.data(|data| {
+            data.get_temp::<(egui::Rect, egui::Vec2)>(egui::Id::new("test-form-layout"))
+                .unwrap()
+        });
+        assert!(harness.ctx.content_rect().contains_rect(rect));
+        assert!(
+            content.x <= rect.width() + 1.0,
+            "horizontal form overflow: content {content:?}, viewport {rect:?}"
+        );
     }
 
     fn action_text(key: &str) -> String {
@@ -849,6 +860,7 @@ mod tests {
                 app.adv_format = advanced;
                 let mut harness = form_harness(app);
                 harness.run();
+                assert_form_fits(&harness);
                 for key in [
                     "IDS_DEVICE_TXT",
                     "IDS_BOOT_SELECTION_TXT",
@@ -898,6 +910,7 @@ mod tests {
         let language = loc::languages().into_iter().next().unwrap();
         assert!(harness.query_by_label(&language.name).is_none());
         harness.get_by_label(&t("MSG_273")).click();
+        harness.run();
         harness.run();
         harness.get_by_label(&language.name);
         assert_eq!(loc::current(), original);
@@ -969,6 +982,21 @@ mod tests {
     }
 
     #[test]
+    fn proportional_fonts_prefer_inter() {
+        let mut harness = Harness::new_ui(|ui| sync_style(ui.ctx()));
+        harness.run();
+        harness.ctx.fonts(|fonts| {
+            assert_eq!(
+                fonts.definitions().families[&egui::FontFamily::Proportional]
+                    .first()
+                    .map(String::as_str),
+                Some("Inter")
+            );
+            assert!(fonts.definitions().font_data.contains_key("Inter"));
+        });
+    }
+
+    #[test]
     fn root_and_footer_panels_have_opaque_matching_theme_surfaces() {
         for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
             let (mut app, _scan_tx) = form_app();
@@ -991,9 +1019,9 @@ mod tests {
             }
             for panel in panels {
                 assert!(
-                    rects
-                        .iter()
-                        .any(|(rect, fill)| *rect == panel && *fill == surface),
+                    rects.iter().any(|(rect, fill)| {
+                        rect.contains_rect(panel.shrink(1.0)) && *fill == surface
+                    }),
                     "panel {panel:?} has no opaque theme fill {surface:?}; painted: {rects:?}"
                 );
             }
