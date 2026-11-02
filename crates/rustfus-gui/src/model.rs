@@ -569,6 +569,9 @@ impl Model {
             job.cluster,
             job.label
         ));
+        #[cfg(target_os = "macos")]
+        self.spawn(move |tx, c| rustfus_core::macos_auth::run_job(&job, tx, c));
+        #[cfg(not(target_os = "macos"))]
         self.spawn(move |tx, c| ops::run_job(&job, tx, c));
     }
 

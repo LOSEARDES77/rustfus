@@ -3,7 +3,7 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Windows User Experience: autounattend.xml generation, like Rufus' wue.c.
 
-#[derive(Clone, Default, PartialEq)]
+#[derive(Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Options {
     pub bypass_hw_checks: bool,
     pub no_online_account: bool,

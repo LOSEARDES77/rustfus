@@ -26,6 +26,7 @@ use dd::write_dd;
 use format::write_fs;
 use to_go::write_wtg;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Msg {
     Progress(f32, String),
     CurrentFile(String),
@@ -33,14 +34,14 @@ pub enum Msg {
     Done(Result<String, String>),
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Scheme {
     Mbr,
     Gpt,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Target {
     BiosUefi,
@@ -58,7 +59,7 @@ impl Target {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Fs {
     Fat,
@@ -140,14 +141,14 @@ impl Fs {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Boot {
     NonBootable,
     FreeDos,
     Image(PathBuf),
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Job {
     pub drive: Drive,
     pub boot: Boot,
@@ -425,7 +426,11 @@ fn open_dev(d: &Drive) -> Result<File, String> {
         if err.raw_os_error() == Some(libc::EBUSY) {
             return format!("{dev} is in use (mounted, swap, LVM or RAID); release it and retry");
         }
-        format!("Cannot open {dev}: {err} (run as root/Administrator)")
+        #[cfg(target_os = "macos")]
+        let hint = "macOS authorization is required for raw disk access";
+        #[cfg(not(target_os = "macos"))]
+        let hint = "run as root/Administrator";
+        format!("Cannot open {dev}: {err} ({hint})")
     })
 }
 
