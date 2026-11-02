@@ -3,7 +3,7 @@
 # Rustfus
 
 **Rustfus** is a Rust rewrite of [Rufus](https://rufus.ie), the Reliable USB
-Formatting Utility, with an [egui](https://github.com/emilk/egui) interface
+Formatting Utility, with an [GPUI Kit](https://github.com/longbridge/gpui-component) interface
 that mirrors the original. Its purpose is to bring the Rufus tool to
 platforms where it doesn't run: **Linux and macOS**, as well as Windows.
 
@@ -59,7 +59,7 @@ The code is split into a workspace:
 |---|---|
 | `crates/rustfus-cli` | The `rustfus` executable (the only binary): the command line, or the GUI when run without arguments |
 | `crates/rustfus-core` | Engine: drive listing, image analysis, partitioning, file systems, boot code, downloads |
-| `crates/rustfus-gui` | The Rufus-style egui interface |
+| `crates/rustfus-gui` | The Rufus-style GPUI Kit interface |
 
 ## Command line
 

@@ -7,7 +7,7 @@ use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Boot, Fs, Job, Msg, Report, Scheme, Target};
 use rustfus_core::update::{self, Release};
-use rustfus_core::{drives, fido, image, iso, loc, net, ops, wtg, wue};
+use rustfus_core::{drives, image, iso, loc, net, ops, wtg, wue};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -144,7 +144,6 @@ pub(crate) struct Model {
 
     pub(crate) dialog: Dialog,
     pub(crate) show_log: bool,
-    pub(crate) show_about: bool,
     pub(crate) log: Log,
 
     pub(crate) update: update::Settings,
@@ -324,7 +323,6 @@ impl Model {
             pending_image: None,
             dialog: Dialog::None,
             show_log: false,
-            show_about: false,
             log,
             update: saved_policy.clone().unwrap_or_default(),
             update_rx: None,
@@ -741,87 +739,6 @@ fn spawn_scanner(
     rx
 }
 
-/// The native downloader owns this state independently of the main dialog.
-#[derive(Default)]
-pub(crate) struct FidoState {
-    pub(crate) chosen: Vec<String>,
-    pub(crate) options: Vec<String>,
-    pub(crate) pick: usize,
-    pub(crate) rx: Option<Receiver<Result<Vec<String>, String>>>,
-    pub(crate) error: Option<String>,
-}
-
-impl FidoState {
-    pub(crate) fn new() -> Self {
-        let mut state = Self::default();
-        state.query();
-        state
-    }
-
-    pub(crate) fn query(&mut self) {
-        if self.rx.is_some() {
-            return;
-        }
-        let (tx, rx) = channel();
-        let chosen = self.chosen.clone();
-        std::thread::spawn(move || {
-            let result = if chosen.len() == fido::FIELDS.len() {
-                fido::url(&chosen).map(|url| vec![url])
-            } else {
-                fido::list(&chosen)
-            };
-            tx.send(result).ok();
-        });
-        self.rx = Some(rx);
-        self.error = None;
-    }
-
-    pub(crate) fn poll(&mut self) -> Option<String> {
-        let result = match self.rx.as_ref()?.try_recv() {
-            Ok(result) => result,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return None,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                Err("Download query worker disconnected".into())
-            }
-        };
-        self.rx = None;
-        match result {
-            Ok(values) if self.chosen.len() == fido::FIELDS.len() => {
-                return values.into_iter().next();
-            }
-            Ok(values) => {
-                self.options = values;
-                self.pick = 0;
-            }
-            Err(error) => {
-                self.chosen.pop();
-                self.error = Some(error);
-            }
-        }
-        None
-    }
-
-    pub(crate) fn next(&mut self) {
-        if self.rx.is_none()
-            && self.chosen.len() < fido::FIELDS.len()
-            && let Some(value) = self.options.get(self.pick).cloned()
-        {
-            self.chosen.push(value);
-            self.query();
-        }
-    }
-
-    pub(crate) fn back(&mut self) {
-        if self.rx.is_none() && self.chosen.pop().is_some() {
-            self.query();
-        }
-    }
-
-    pub(crate) fn cancel(&mut self) {
-        self.rx = None;
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -968,24 +885,5 @@ mod tests {
         drop(model);
         assert!(stop.load(Ordering::Relaxed));
         assert!(cancel.load(Ordering::Relaxed));
-    }
-
-    #[test]
-    fn fido_poll_and_cancel_do_not_launch_downloads() {
-        let mut state = FidoState::default();
-        let (tx, rx) = channel();
-        state.chosen = vec![String::new(); fido::FIELDS.len()];
-        state.rx = Some(rx);
-        tx.send(Ok(vec!["https://example.test/image.iso".into()]))
-            .unwrap();
-        assert_eq!(
-            state.poll().as_deref(),
-            Some("https://example.test/image.iso")
-        );
-        let (tx, rx) = channel();
-        state.rx = Some(rx);
-        state.cancel();
-        assert!(tx.send(Ok(vec![])).is_err());
-        assert!(state.poll().is_none());
     }
 }

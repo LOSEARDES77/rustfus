@@ -114,6 +114,7 @@ pub(crate) struct RustfusView {
     theme: Option<ThemeMode>,
     downloader: Option<AnyWindowHandle>,
     picker: Option<Task<()>>,
+    pub(crate) poll_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -180,6 +181,7 @@ impl RustfusView {
             theme: None,
             downloader: None,
             picker: None,
+            poll_task: None,
             _subscriptions: subscriptions,
         };
         view.refresh_controls(window, cx);

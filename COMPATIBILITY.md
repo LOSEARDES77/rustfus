@@ -65,7 +65,7 @@ systems.
 
 | Feature | Linux | Windows | macOS | Notes |
 |---|:-:|:-:|:-:|---|
-| Rufus-style egui window | 🟢 | 🟢 | 🟢 | |
+| Rufus-style GPUI Kit window | 🟢 | 🟢 | 🟢 | |
 | 38 languages (rufus.loc) | 🟢 | 🟢 | 🟢 | |
 | Log, About, dark mode | 🟢 | 🟢 | 🟢 | |
 | Drag and drop images | 🟢 | 🟢 | 🟢 | |

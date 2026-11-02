@@ -2,83 +2,13 @@
 // Copyright © 2026 Rustfus contributors
 //! AppKit's standard About panel, including metadata for unbundled cargo runs.
 
-use std::cell::OnceCell;
-
-use objc2::{
-    AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::AnyObject, sel,
-};
+use objc2::{AnyThread, MainThreadMarker, runtime::AnyObject};
 use objc2_app_kit::{
     NSAboutPanelOptionApplicationIcon, NSAboutPanelOptionApplicationName,
     NSAboutPanelOptionApplicationVersion, NSAboutPanelOptionCredits, NSAboutPanelOptionVersion,
-    NSApplication, NSImage, NSMenu,
+    NSApplication, NSImage,
 };
-use objc2_foundation::{
-    NSAttributedString, NSData, NSDictionary, NSObject, NSObjectProtocol, NSString, ns_string,
-};
-
-define_class!(
-    // SAFETY: NSObject has no subclass requirements; this class has no custom Drop.
-    #[unsafe(super = NSObject)]
-    #[thread_kind = MainThreadOnly]
-    struct RustfusAboutTarget;
-
-    // SAFETY: NSObjectProtocol imposes no additional requirements.
-    unsafe impl NSObjectProtocol for RustfusAboutTarget {}
-
-    impl RustfusAboutTarget {
-        #[unsafe(method(showRustfusAbout:))]
-        fn show_about(&self, _sender: Option<&AnyObject>) {
-            if let Err(error) = show() {
-                eprintln!("Could not show About Rustfus: {error}");
-            }
-        }
-    }
-);
-
-thread_local! {
-    // NSMenuItem's target is weak. Keep our main-thread action target alive.
-    static MENU_TARGET: OnceCell<Retained<RustfusAboutTarget>> = const { OnceCell::new() };
-}
-
-fn bind_menu(menu: &NSMenu, target: &RustfusAboutTarget) -> usize {
-    let mut bound = 0;
-    for item in menu.itemArray() {
-        if matches!(item.action(), Some(action) if action == sel!(orderFrontStandardAboutPanel:) || action == sel!(showRustfusAbout:))
-        {
-            item.setTitle(ns_string!("About Rustfus"));
-            // SAFETY: The retained main-thread target implements this exact sender action.
-            unsafe {
-                item.setTarget(Some(target.as_ref()));
-                item.setAction(Some(sel!(showRustfusAbout:)));
-            }
-            bound += 1;
-        }
-        if let Some(submenu) = item.submenu() {
-            bound += bind_menu(&submenu, target);
-        }
-    }
-    bound
-}
-
-/// Replace winit's default About action without replacing the application menu.
-pub(crate) fn install_menu_handler() -> Result<(), &'static str> {
-    let mtm = MainThreadMarker::new().ok_or("AppKit requires the main thread")?;
-    let menu = NSApplication::sharedApplication(mtm)
-        .mainMenu()
-        .ok_or("the application menu is not installed")?;
-    let bound = MENU_TARGET.with(|slot| {
-        let target = slot.get_or_init(|| {
-            // SAFETY: NSObject's init returns an initialized instance of this subclass.
-            unsafe { msg_send![RustfusAboutTarget::alloc(mtm), init] }
-        });
-        bind_menu(&menu, target)
-    });
-    if bound == 0 {
-        return Err("the application About menu item was not found");
-    }
-    Ok(())
-}
+use objc2_foundation::{NSAttributedString, NSData, NSDictionary, NSString, ns_string};
 
 pub(crate) fn show() -> Result<(), &'static str> {
     let mtm = MainThreadMarker::new().ok_or("AppKit requires the main thread")?;

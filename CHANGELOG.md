@@ -10,7 +10,7 @@ First public release.
 
 ### Added
 
-- Rufus-style egui interface and a `rustfus` command line (`list`, `info`,
+- Rufus-style GPUI Kit interface and a `rustfus` command line (`list`, `info`,
   `write`, `save`, `download`, `hash`).
 - DD mode with verification, including compressed and `.vhd`/`.vhdx` images.
 - ISO mode for ISO9660/Joliet/Rock Ridge/UDF images onto FAT32, NTFS or exFAT.

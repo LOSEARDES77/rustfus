@@ -6,19 +6,19 @@
 use crate::model::{Dialog, Model};
 use crate::ui::RustfusView;
 use gpui_kit::component::{
-    Disableable, IndexPath, WindowExt,
+    IndexPath, WindowExt,
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
-    input::{Input, InputState},
+    input::{Input, InputEvent, InputState},
     progress::Progress,
     radio::Radio,
     select::{SearchableVec, Select, SelectState},
     text::TextView,
 };
 use gpui_kit::{
-    App, AppContext, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
-    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div, prelude::FluentBuilder,
-    px,
+    App, AppContext, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
+    WeakEntity, Window, div, prelude::FluentBuilder, px,
 };
 use rustfus_core::loc::{t, tf};
 use rustfus_core::{syslinux, update::Version};
@@ -46,17 +46,14 @@ fn title(dialog: &Dialog, model: &Model) -> String {
         Dialog::None => String::new(),
         Dialog::Download | Dialog::SyslinuxDownload(_) => t("MSG_115"),
         Dialog::ReplaceC32(index) => {
-            let path = model
-                .obsolete_c32()
-                .get(*index)
-                .map(String::as_str)
-                .unwrap_or("");
+            let paths = model.obsolete_c32();
+            let path = paths.get(*index).map(String::as_str).unwrap_or("");
             tf("MSG_083", &[path.rsplit('/').next().unwrap_or(path)])
         }
         Dialog::Edition => t("MSG_118"),
         Dialog::Wue => t("MSG_327"),
         Dialog::Hybrid { .. } => tf("MSG_274", &["ISOHybrid"]),
-        Dialog::Confirm => "WARNING".into(),
+        Dialog::Confirm => "Warning".into(),
         Dialog::Hash(..) => "Checksums".into(),
         Dialog::NewVersion(_) => t("IDD_NEW_VERSION").replace("Rufus", "Rustfus"),
         Dialog::Error(_) => t("MSG_042"),
@@ -120,11 +117,12 @@ pub(crate) fn open(
             // Enter must never approve a destructive operation from dialog-level focus.
             .on_ok(|_, _, _| false)
             .child(content.clone())
-            .on_close(move |_, _, cx| {
+            .on_close(move |_, window, cx| {
                 if let Some(parent) = parent.upgrade() {
                     parent.update(cx, |view, cx| {
                         if key(&view.model.dialog) == expected {
                             view.model.cancel_dialog();
+                            view.refresh_controls(window, cx);
                             cx.notify();
                         }
                     });
@@ -141,6 +139,7 @@ pub(crate) struct DialogView {
     edition_ids: Vec<u32>,
     cancel_focus: FocusHandle,
     _parent_observer: Subscription,
+    _username_subscription: Subscription,
 }
 
 impl DialogView {
@@ -148,21 +147,29 @@ impl DialogView {
         parent: WeakEntity<RustfusView>,
         expected: String,
         window: &mut Window,
-        cx: &Context<Self>,
+        cx: &mut Context<Self>,
     ) -> Self {
         let entity = parent
             .upgrade()
             .expect("dialog parent exists while opening");
-        let model = &entity.read(cx).model;
-        let username = model.wue_user.clone();
-        let edition_ids = model.editions.iter().map(|(id, _)| *id).collect::<Vec<_>>();
-        let selected = edition_ids.iter().position(|id| *id == model.edition);
-        let editions = model
-            .editions
-            .iter()
-            .map(|(_, label)| SharedString::from(label.clone()))
-            .collect::<Vec<_>>();
+        let (username, edition_ids, selected, editions) = {
+            let model = &entity.read(cx).model;
+            let edition_ids = model.editions.iter().map(|(id, _)| *id).collect::<Vec<_>>();
+            let selected = edition_ids.iter().position(|id| *id == model.edition);
+            let editions = model
+                .editions
+                .iter()
+                .map(|(_, label)| SharedString::from(label.clone()))
+                .collect::<Vec<_>>();
+            (model.wue_user.clone(), edition_ids, selected, editions)
+        };
         let username = cx.new(|cx| InputState::new(window, cx).default_value(username));
+        let username_subscription = cx.subscribe(&username, |this, input, event, cx| {
+            if matches!(event, InputEvent::Change) && this.expected == key(&Dialog::Wue) {
+                let value = input.read(cx).value().to_string();
+                this.change(cx, |model| model.wue_user = value);
+            }
+        });
         let edition = cx.new(|cx| {
             SelectState::new(
                 SearchableVec::new(editions),
@@ -181,6 +188,7 @@ impl DialogView {
             edition_ids,
             cancel_focus: cx.focus_handle(),
             _parent_observer: observer,
+            _username_subscription: username_subscription,
         }
     }
 
@@ -275,32 +283,43 @@ impl Render for DialogView {
         let Some(parent) = self.parent.upgrade() else {
             return body;
         };
-        let model = &parent.read(cx).model;
-        if key(&model.dialog) != self.expected {
-            return body;
-        }
+        let (dialog, wue, use_account, wtg, drive_name, download_message) = {
+            let model = &parent.read(cx).model;
+            if key(&model.dialog) != self.expected {
+                return body;
+            }
+            let message = match &model.dialog {
+                Dialog::Download => tf("MSG_116", &[&model.report.grub2_version, "2.14"]),
+                Dialog::SyslinuxDownload(version) => {
+                    tf("MSG_114", &[version, "", &syslinux::embedded_version(), ""])
+                        .replace("Rufus", "Rustfus")
+                }
+                Dialog::ReplaceC32(index) => {
+                    let paths = model.obsolete_c32();
+                    let path = paths.get(*index).map(String::as_str).unwrap_or("");
+                    let name = path.rsplit('/').next().unwrap_or(path);
+                    tf("MSG_084", &[name, name])
+                }
+                _ => String::new(),
+            };
+            (
+                model.dialog.clone(),
+                model.wue.clone(),
+                model.wue_use_account,
+                model.wtg,
+                model
+                    .confirmation_drive
+                    .as_ref()
+                    .map(|drive| drive.label())
+                    .unwrap_or_default(),
+                message,
+            )
+        };
         let mut footer = div().flex().justify_end().gap_2().mt_2();
-        match model.dialog.clone() {
+        match dialog {
             Dialog::None => return body,
             Dialog::Download | Dialog::SyslinuxDownload(_) | Dialog::ReplaceC32(_) => {
-                let message = match &model.dialog {
-                    Dialog::Download => tf("MSG_116", &[&model.report.grub2_version, "2.14"]),
-                    Dialog::SyslinuxDownload(version) => {
-                        tf("MSG_114", &[version, "", &syslinux::embedded_version(), ""])
-                            .replace("Rufus", "Rustfus")
-                    }
-                    Dialog::ReplaceC32(index) => {
-                        let path = model
-                            .obsolete_c32()
-                            .get(*index)
-                            .map(String::as_str)
-                            .unwrap_or("");
-                        let name = path.rsplit('/').next().unwrap_or(path);
-                        tf("MSG_084", &[name, name])
-                    }
-                    _ => unreachable!(),
-                };
-                body = body.child(message);
+                body = body.child(download_message);
                 footer = footer
                     .child(self.cancel(crate::ui::action_label(&t("MSG_007")), cx))
                     .child(
@@ -325,51 +344,51 @@ impl Render for DialogView {
                     .child(t("MSG_328"))
                     .child(self.checkbox(
                         "hardware",
-                        model.wue.bypass_hw_checks,
+                        wue.bypass_hw_checks,
                         t("MSG_329"),
                         |m, v| m.wue.bypass_hw_checks = v,
                         cx,
                     ))
                     .child(self.checkbox(
                         "online-account",
-                        model.wue.no_online_account,
+                        wue.no_online_account,
                         t("MSG_330"),
                         |m, v| m.wue.no_online_account = v,
                         cx,
                     ))
                     .child(self.checkbox(
                         "local-account",
-                        model.wue_use_account,
+                        use_account,
                         t("MSG_333"),
                         |m, v| m.wue_use_account = v,
                         cx,
                     ))
-                    .child(Input::new(&self.username).disabled(!model.wue_use_account))
+                    .child(Input::new(&self.username).disabled(!use_account))
                     .child(self.checkbox(
                         "regional",
-                        model.wue.regional,
+                        wue.regional,
                         t("MSG_334"),
                         |m, v| m.wue.regional = v,
                         cx,
                     ))
                     .child(self.checkbox(
                         "data-collection",
-                        model.wue.no_data_collection,
+                        wue.no_data_collection,
                         t("MSG_331"),
                         |m, v| m.wue.no_data_collection = v,
                         cx,
                     ))
                     .child(self.checkbox(
                         "bitlocker",
-                        model.wue.no_bitlocker,
+                        wue.no_bitlocker,
                         t("MSG_335"),
                         |m, v| m.wue.no_bitlocker = v,
                         cx,
                     ));
-                if model.wtg {
+                if wtg {
                     body = body.child(self.checkbox(
                         "internal-drives",
-                        model.wue.wtg_no_internal,
+                        wue.wtg_no_internal,
                         t("MSG_332"),
                         |m, v| m.wue.wtg_no_internal = v,
                         cx,
@@ -398,12 +417,7 @@ impl Render for DialogView {
                     .child(self.approve(crate::ui::action_label(&t("IDOK")), false, cx));
             }
             Dialog::Confirm => {
-                let name = model
-                    .confirmation_drive
-                    .as_ref()
-                    .map(|drive| drive.label())
-                    .unwrap_or_default();
-                body = body.child(tf("MSG_003", &[&name]));
+                body = body.child(tf("MSG_003", &[&drive_name]));
                 footer = footer
                     .child(self.cancel(crate::ui::action_label(&t("IDCANCEL")), cx))
                     .child(self.approve(crate::ui::action_label(&t("IDOK")), true, cx));

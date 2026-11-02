@@ -103,7 +103,7 @@ Rustfus itself does.
 
 | Rufus feature | Linux | Windows | macOS | Notes |
 |---|:-:|:-:|:-:|---|
-| Rufus-style window | 🟢 | 🟢 | 🟢 | egui |
+| Rufus-style window | 🟢 | 🟢 | 🟢 | GPUI Kit |
 | Languages (rufus.loc, 38) | 🟢 | 🟢 | 🟢 | |
 | Log window (clear / save) | 🟢 | 🟢 | 🟢 | |
 | About dialog | 🟢 | 🟢 | 🟢 | |

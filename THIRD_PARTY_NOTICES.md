@@ -94,5 +94,5 @@ All crates Rustfus links are under licenses compatible with GPL-3.0:
 MIT, Apache-2.0, BSD-2/3-Clause, Zlib, ISC, BSL-1.0, Unlicense, 0BSD,
 Unicode-3.0, bzip2-1.0.6, and dual-licensed crates for which a permissive
 option is chosen (`r-efi`: MIT/Apache-2.0; `self_cell`: Apache-2.0).
-egui's bundled fonts are under the SIL Open Font License 1.1 and the Ubuntu
+The bundled Inter font is under the SIL Open Font License 1.1 and the Ubuntu
 Font Licence 1.0. Run `cargo tree --format "{p} {l}"` for the full list.

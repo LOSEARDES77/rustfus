@@ -1,6 +1,6 @@
 [package]
 name = "rustfus-cli"
-description = "Rufus-style bootable USB creator with an egui GUI and a command line, for Linux, macOS and Windows."
+description = "Rufus-style bootable USB creator with a GPUI Kit GUI and a command line, for Linux, macOS and Windows."
 readme = "../../README.md"
 version.workspace = true
 edition.workspace = true
