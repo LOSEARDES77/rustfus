@@ -179,7 +179,7 @@ fn validate_device_path(path: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_job(job: &Job) -> Result<(), String> {
+fn validate_job_shape(job: &Job) -> Result<(), String> {
     validate_device_path(&job.drive.path)?;
     if job.drive.size == 0 {
         return Err("The selected disk has no reported capacity".into());
@@ -192,7 +192,12 @@ fn validate_job(job: &Job) -> Result<(), String> {
     if !job.fs.supported() || job.wtg.is_some() {
         return Err("This write mode is not supported on macOS".into());
     }
-    // list(true) admits external physical media only; verify again inside run_job/unmount.
+    Ok(())
+}
+
+fn validate_authorized_job(job: &Job) -> Result<(), String> {
+    validate_job_shape(job)?;
+    // Only the authorized process opens the raw disk on macOS.
     drives::verify(&job.drive)
 }
 
@@ -220,7 +225,7 @@ pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<Strin
     if cancel.load(Ordering::Relaxed) {
         return Err(CANCELLED.into());
     }
-    validate_job(job)?;
+    validate_job_shape(job)?;
     if effective_uid() == 0 {
         return ops::run_job(job, tx, cancel);
     }
@@ -467,7 +472,7 @@ fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
                 if worker_cancel.load(Ordering::Relaxed) {
                     return Err(CANCELLED.into());
                 }
-                validate_job(&job)?;
+                validate_authorized_job(&job)?;
                 if worker_cancel.load(Ordering::Relaxed) {
                     return Err(CANCELLED.into());
                 }

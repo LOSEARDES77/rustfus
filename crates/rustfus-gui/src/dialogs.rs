@@ -279,7 +279,7 @@ impl Render for DialogView {
         let Some(parent) = self.parent.upgrade() else {
             return body;
         };
-        let (dialog, wue, use_account, wtg, drive_name, download_message) = {
+        let (dialog, wue, use_account, windows_11, wtg, drive_name, download_message) = {
             let model = &parent.read(cx).model;
             if key(&model.dialog) != self.expected {
                 return body;
@@ -302,6 +302,7 @@ impl Render for DialogView {
                 model.dialog.clone(),
                 model.wue.clone(),
                 model.wue_use_account,
+                model.report.windows_11,
                 model.wtg,
                 model
                     .confirmation_drive
@@ -336,22 +337,25 @@ impl Render for DialogView {
                     .child(self.approve(crate::ui::action_label(&t("IDOK")), false, cx));
             }
             Dialog::Wue => {
+                body = body.child(t("MSG_328"));
+                if windows_11 {
+                    body = body
+                        .child(self.checkbox(
+                            "hardware",
+                            wue.bypass_hw_checks,
+                            t("MSG_329"),
+                            |m, v| m.wue.bypass_hw_checks = v,
+                            cx,
+                        ))
+                        .child(self.checkbox(
+                            "online-account",
+                            wue.no_online_account,
+                            t("MSG_330"),
+                            |m, v| m.wue.no_online_account = v,
+                            cx,
+                        ));
+                }
                 body = body
-                    .child(t("MSG_328"))
-                    .child(self.checkbox(
-                        "hardware",
-                        wue.bypass_hw_checks,
-                        t("MSG_329"),
-                        |m, v| m.wue.bypass_hw_checks = v,
-                        cx,
-                    ))
-                    .child(self.checkbox(
-                        "online-account",
-                        wue.no_online_account,
-                        t("MSG_330"),
-                        |m, v| m.wue.no_online_account = v,
-                        cx,
-                    ))
                     .child(self.checkbox(
                         "local-account",
                         use_account,

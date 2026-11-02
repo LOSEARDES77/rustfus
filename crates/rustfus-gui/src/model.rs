@@ -445,6 +445,22 @@ impl Model {
         self.image_mode() && self.report.is_iso && !self.dd
     }
 
+    fn windows_options(&self) -> wue::Options {
+        if !self.iso_mode() || !self.report.windows {
+            return wue::Options::default();
+        }
+        wue::Options {
+            bypass_hw_checks: self.report.windows_11 && self.wue.bypass_hw_checks,
+            no_online_account: self.report.windows_11 && self.wue.no_online_account,
+            local_account: self
+                .wue_use_account
+                .then(|| self.wue_user.trim().to_string())
+                .filter(|name| !name.is_empty()),
+            wtg_no_internal: self.wtg && self.wue.wtg_no_internal,
+            ..self.wue.clone()
+        }
+    }
+
     /// Rufus' START sequence: boot file downloads, WTG edition, Windows
     /// customization or ISOHybrid choice, then the data-loss warning.
     /// `stage` is how far the user already got.
@@ -467,7 +483,7 @@ impl Model {
         if stage < 3 && iso && r.windows && self.wtg {
             return Dialog::Edition;
         }
-        if stage < 4 && iso && r.windows {
+        if stage < 4 && self.iso_mode() && r.windows {
             return Dialog::Wue;
         }
         if stage < 4 && iso && r.hybrid {
@@ -547,14 +563,7 @@ impl Model {
             } else {
                 0
             },
-            wue: wue::Options {
-                local_account: self
-                    .wue_use_account
-                    .then(|| self.wue_user.clone())
-                    .filter(|u| !u.trim().is_empty()),
-                wtg_no_internal: self.wue.wtg_no_internal && self.wtg,
-                ..self.wue.clone()
-            },
+            wue: self.windows_options(),
             allow_downloads: self.allow_downloads,
             replace_c32: self.replace_c32.clone(),
             wtg: (self.wtg && self.iso_mode() && self.report.windows).then_some(self.edition),

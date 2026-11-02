@@ -181,6 +181,7 @@ pub struct Report {
     pub is_iso: bool,
     pub label: String,
     pub windows: bool,
+    pub windows_11: bool,
     pub efi: bool,
     pub bios: bool,
     pub grub2: bool,
@@ -303,6 +304,7 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
         is_iso: true,
         label: iso.volume_id(),
         windows,
+        windows_11: windows && crate::wtg::is_windows_11(&iso),
         efi: et.efi
             || lower
                 .iter()

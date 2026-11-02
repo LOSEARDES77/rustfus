@@ -5936,6 +5936,7 @@ dependencies = [
  "libc",
  "lzma-rust2",
  "md-5 0.11.0",
+ "roxmltree 0.21.2",
  "rsa",
  "ruzstd",
  "serde",
