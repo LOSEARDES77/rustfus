@@ -18,11 +18,47 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const MB: u64 = 1 << 20;
 
 type ScanResult = Result<Vec<Drive>, String>;
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct Log(Vec<String>);
+
+impl Log {
+    pub(super) fn push(&mut self, value: String) {
+        let seconds = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs()
+            % 86_400;
+        let timestamp = format!(
+            "[{:02}:{:02}:{:02}]",
+            seconds / 3600,
+            seconds / 60 % 60,
+            seconds % 60
+        );
+        // split preserves empty messages and trailing blank rows, unlike lines().
+        self.0.extend(value.split('\n').map(|line| {
+            let line = line.strip_suffix('\r').unwrap_or(line);
+            format!("{timestamp} {line}")
+        }));
+    }
+
+    fn clear(&mut self) {
+        self.0.clear();
+    }
+}
+
+impl std::ops::Deref for Log {
+    type Target = [String];
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 fn finish_scan(
     scanning: &mut bool,
@@ -142,7 +178,7 @@ struct App {
     show_log: bool,
     show_about: bool,
     theme_preference: egui::ThemePreference,
-    log: Vec<String>,
+    log: Log,
 
     update: update::Settings,
     update_rx: Option<Receiver<Result<Option<Release>, String>>>,
@@ -213,6 +249,8 @@ impl App {
         rescan: Arc<AtomicBool>,
         saved_policy: Option<update::Settings>,
     ) -> Self {
+        let mut log = Log::default();
+        log.push(format!("Rustfus {}", env!("CARGO_PKG_VERSION")));
         App {
             drives: Vec::new(),
             selected: None,
@@ -262,7 +300,7 @@ impl App {
             show_log: false,
             show_about: false,
             theme_preference: egui::ThemePreference::System,
-            log: vec![format!("Rustfus {}", env!("CARGO_PKG_VERSION"))],
+            log,
             update: saved_policy.clone().unwrap_or_default(),
             update_rx: None,
             update_manual: false,
@@ -275,6 +313,56 @@ impl App {
             started: None,
             elapsed: Duration::ZERO,
         }
+    }
+
+    fn log_panel(&mut self, ui: &mut egui::Ui) -> Option<egui::Rect> {
+        if !self.show_log {
+            return None;
+        }
+        let height = 140.0_f32.min((ui.ctx().content_rect().height() * 0.25).max(0.0));
+        Some(
+            egui::Panel::bottom("logs")
+                .exact_size(height)
+                .resizable(false)
+                .frame(egui::Frame::NONE.fill(egui::Color32::BLACK).inner_margin(8))
+                .show(ui, |ui| {
+                    ui.style_mut().visuals = egui::Visuals::dark();
+                    ui.visuals_mut().override_text_color = Some(egui::Color32::WHITE);
+                    ui.horizontal(|ui| {
+                        ui.label(format!("{} · UTC", t("IDD_LOG")));
+                        if ui.button(t("IDC_LOG_CLEAR")).clicked() {
+                            self.log.clear();
+                        }
+                        if ui.button(t("IDC_LOG_SAVE")).clicked()
+                            && let Some(path) = rfd::FileDialog::new()
+                                .set_file_name("rustfus.log")
+                                .save_file()
+                            && let Err(error) = std::fs::write(path, self.log.join("\n"))
+                        {
+                            self.log.push(format!("ERROR: Could not save log: {error}"));
+                        }
+                    });
+                    egui::ScrollArea::both()
+                        .id_salt("log-scroll")
+                        .auto_shrink([false, false])
+                        .stick_to_bottom(true)
+                        .show(ui, |ui| {
+                            let text = self.log.join("\n");
+                            let mut text = text.as_str();
+                            // An immutable buffer permits selection and copying, but not edits.
+                            ui.add(
+                                egui::TextEdit::multiline(&mut text)
+                                    .code_editor()
+                                    .text_color(egui::Color32::WHITE)
+                                    .frame(egui::Frame::NONE)
+                                    .desired_rows(1)
+                                    .desired_width(f32::INFINITY),
+                            );
+                        });
+                })
+                .response
+                .rect,
+        )
     }
 
     fn drive(&self) -> Option<&Drive> {
@@ -678,6 +766,7 @@ impl eframe::App for App {
                     });
                 });
             });
+        self.log_panel(ui);
         egui::Panel::bottom("actions")
             .frame(
                 egui::Frame::NONE
@@ -746,6 +835,99 @@ mod tests {
         kittest::{By, NodeT, Queryable},
     };
 
+    #[test]
+    fn log_timestamps_every_row_and_preserves_messages_for_copy_and_save() {
+        let mut log = Log::default();
+        log.push("ERROR: <disk> & café\n\nsecond\r\n".into());
+        log.push(String::new());
+        assert_eq!(log.len(), 5);
+        let expected = ["ERROR: <disk> & café", "", "second", "", ""];
+        for (row, message) in log.iter().zip(expected) {
+            let prefix = &row[..11];
+            assert_eq!(&prefix[0..1], "[");
+            assert_eq!(&prefix[3..4], ":");
+            assert_eq!(&prefix[6..7], ":");
+            assert_eq!(&prefix[9..11], "] ");
+            assert!(prefix[1..3].parse::<u8>().unwrap() < 24);
+            assert!(prefix[4..6].parse::<u8>().unwrap() < 60);
+            assert!(prefix[7..9].parse::<u8>().unwrap() < 60);
+            assert_eq!(&row[11..], message);
+        }
+        let text = log.join("\n");
+        assert_eq!(
+            text.lines().collect::<Vec<_>>(),
+            log.iter().map(String::as_str).collect::<Vec<_>>()
+        );
+        assert_eq!(log.clone(), log);
+        log.clear();
+        assert!(log.is_empty());
+    }
+
+    #[test]
+    fn docked_log_is_black_and_between_footer_and_device_info() {
+        let (mut app, _tx) = form_app();
+        let ctx = egui::Context::default();
+        for theme in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+            ctx.set_theme(theme);
+            for size in [egui::vec2(470.0, 440.0), egui::vec2(520.0, 700.0)] {
+                for visible in [false, true, false] {
+                    app.show_log = visible;
+                    let mut rects = None;
+                    for _ in 0..2 {
+                        let mut output = ctx.run_ui(
+                            egui::RawInput {
+                                screen_rect: Some(egui::Rect::from_min_size(
+                                    egui::Pos2::ZERO,
+                                    size,
+                                )),
+                                ..Default::default()
+                            },
+                            |root| {
+                                egui::CentralPanel::default().frame(egui::Frame::NONE).show(
+                                    root,
+                                    |ui| {
+                                        let status = egui::Panel::bottom("log-test-status")
+                                            .show(ui, |ui| {
+                                                ui.label("Device info · 00:00:00");
+                                            })
+                                            .response
+                                            .rect;
+                                        let log = app.log_panel(ui);
+                                        let actions = egui::Panel::bottom("log-test-actions")
+                                            .show(ui, |ui| app.footer(ui))
+                                            .response
+                                            .rect;
+                                        rects = Some((actions, log, status));
+                                    },
+                                );
+                            },
+                        );
+                        output.textures_delta.clear();
+                        assert_eq!(
+                            output.viewport_output.len(),
+                            1,
+                            "logs must not open a native viewport"
+                        );
+                        if visible {
+                            assert!(output.shapes.iter().any(|shape| matches!(
+                                &shape.shape,
+                                egui::Shape::Rect(rect) if rect.fill == egui::Color32::BLACK
+                            )));
+                        }
+                    }
+                    let (actions, log, status) = rects.unwrap();
+                    assert_eq!(log.is_some(), visible);
+                    if let Some(log) = log {
+                        assert!(actions.bottom() <= log.top() + 1.0);
+                        assert!(log.bottom() <= status.top() + 1.0);
+                        assert!(log.height() <= 140.0 + 1.0);
+                        assert!(ctx.content_rect().contains_rect(log));
+                    }
+                }
+            }
+        }
+    }
+
     fn form_app() -> (App, Sender<ScanResult>) {
         let (tx, rx) = channel();
         let mut app = App::with_inputs(
@@ -797,6 +979,7 @@ mod tests {
                                 );
                             });
                         });
+                    app.log_panel(&mut root);
                     let actions = egui::Panel::bottom("actions")
                         .frame(
                             egui::Frame::NONE
@@ -925,6 +1108,55 @@ mod tests {
                 assert!(harness.state().update_rx.is_none());
             }
         }
+    }
+
+    #[test]
+    fn empty_form_fits_without_scrolling_or_inline_guidance() {
+        let mut overflow = Vec::new();
+        for width in [470.0, 520.0] {
+            for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+                let (mut app, _scan_tx) = form_app();
+                app.set_drives(vec![]);
+                app.adv_drive = false;
+                app.adv_format = false;
+                app.show_log = false;
+                app.theme_preference = preference;
+                let mut harness = form_harness_at(app, egui::vec2(width, 620.0));
+                harness.run_steps(3);
+                assert_form_fits(&harness);
+                let (viewport, content) = harness.ctx.data(|data| {
+                    data.get_temp::<(egui::Rect, egui::Vec2)>(egui::Id::new("test-form-layout"))
+                        .unwrap()
+                });
+                if content.y > viewport.height() + 1.0 {
+                    overflow.push(format!(
+                        "width {width}, {preference:?}: content {content:?}, viewport {viewport:?}"
+                    ));
+                }
+                assert!(harness.query_by_label("Retry scan").is_none());
+                assert!(
+                    harness
+                        .query_by_label("No devices found. Connect a USB drive and rescan.")
+                        .is_none()
+                );
+                if content.y <= viewport.height() + 1.0 {
+                    assert_eq!(
+                        harness
+                            .output()
+                            .shapes
+                            .iter()
+                            .map(|shape| rendered_label_count(&shape.shape, "No devices found"))
+                            .sum::<usize>(),
+                        1
+                    );
+                }
+                assert!(harness.state().busy.is_none());
+                assert!(harness.state().hash_rx.is_none());
+                assert!(harness.state().update_rx.is_none());
+                assert!(!harness.state().rescan.load(Ordering::Relaxed));
+            }
+        }
+        assert!(overflow.is_empty(), "form scrolls: {overflow:#?}");
     }
 
     #[test]
@@ -1084,6 +1316,31 @@ mod tests {
                         "{label}: {rect:?} outside {padded:?}"
                     );
                 }
+                let boot = harness
+                    .get(
+                        By::new()
+                            .role(egui::accesskit::Role::ComboBox)
+                            .label(&t("MSG_280")),
+                    )
+                    .rect();
+                let select = harness.get_by_label(&action_text("IDC_SELECT")).rect();
+                let menu = harness.get_by_label("Image source").rect();
+                for (label, rect) in [
+                    ("Boot selection", boot),
+                    ("Select", select),
+                    ("Image source", menu),
+                ] {
+                    assert!((rect.height() - 36.0).abs() <= 1.0, "{label}: {rect:?}");
+                }
+                assert!(
+                    boot.right() <= select.left(),
+                    "selector overlaps action: {boot:?}, {select:?}"
+                );
+                assert!((boot.height() - select.height()).abs() <= 1.0);
+                assert!(
+                    (select.right() - menu.left()).abs() <= 1.0,
+                    "split action gap: {select:?}, {menu:?}"
+                );
                 assert!(harness.state().image.is_none());
                 assert!(harness.state().hash_rx.is_none());
                 assert!(harness.state().busy.is_none());
@@ -1221,10 +1478,67 @@ mod tests {
     }
 
     #[test]
+    fn empty_scan_status_and_disabled_save_guidance_are_not_duplicated() {
+        let (mut app, _scan_tx) = form_app();
+        app.set_drives(vec![]);
+        let mut harness = form_harness(app);
+        harness.run_steps(3);
+        assert_eq!(
+            harness
+                .output()
+                .shapes
+                .iter()
+                .map(|s| rendered_label_count(&s.shape, "No devices found"))
+                .sum::<usize>(),
+            1
+        );
+        let guidance = "No devices found. Connect a USB drive and rescan.";
+        assert!(harness.query_by_label(guidance).is_none());
+        assert!(harness.query_by_label("Retry scan").is_none());
+        let label = action_label(&t("MSG_304"));
+        let center = harness.get_by_label(&label).rect().center();
+        harness.hover_at(center);
+        harness.run_steps(8);
+        assert_eq!(
+            harness.output().platform_output.cursor_icon,
+            egui::CursorIcon::NotAllowed
+        );
+        assert_eq!(
+            harness
+                .output()
+                .shapes
+                .iter()
+                .map(|s| rendered_label_count(&s.shape, guidance))
+                .sum::<usize>(),
+            1
+        );
+        assert_eq!(
+            harness
+                .output()
+                .shapes
+                .iter()
+                .map(|s| rendered_label_count(&s.shape, &label))
+                .sum::<usize>(),
+            0
+        );
+        harness.get_by_label("Retry scan");
+        assert!(harness.state().busy.is_none());
+        assert!(!harness.state().rescan.load(Ordering::Relaxed));
+    }
+
+    #[test]
     fn retry_scan_only_requests_the_synthetic_scanner() {
         let (mut app, scan_tx) = form_app();
         app.scan_error = Some("Synthetic scan failure".into());
         let mut harness = form_harness(app);
+        harness.run_steps(3);
+        assert!(harness.query_by_label("Retry scan").is_none());
+        let save_label = action_label(&t("MSG_304"));
+        let save = harness.get_by_label(&save_label);
+        assert!(save.accesskit_node().is_disabled());
+        let center = save.rect().center();
+        harness.hover_at(center);
+        harness.run_steps(8);
         harness.get_by_label("Retry scan").click();
         harness.run();
         assert!(harness.state().scanning);

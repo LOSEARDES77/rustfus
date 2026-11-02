@@ -5,13 +5,11 @@
 
 use eframe::egui::{self, Color32, RichText};
 use functora_egui::{
-    Button as FunctoraButton, ButtonVariant, Checkbox, ComponentSize, Dialog, LucideIcon, Progress,
+    Button as FunctoraButton, ButtonVariant, Checkbox, ComponentSize, Dialog, LucideIcon,
     Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
 };
 use rustfus_core::image;
 use rustfus_core::loc::{t, tf};
-
-pub(crate) const RUFUS_GREEN: Color32 = Color32::from_rgb(0x06, 0xb0, 0x25);
 
 fn rufus_theme(dark: bool) -> ShadcnTheme {
     let mut theme = if dark {
@@ -51,6 +49,18 @@ fn rufus_theme(dark: bool) -> ShadcnTheme {
         theme.ring = gray(115);
     }
 
+    theme.primary = if dark {
+        Color32::from_rgb(251, 146, 60)
+    } else {
+        Color32::from_rgb(194, 65, 12)
+    };
+    theme.primary_foreground = if dark { gray(24) } else { Color32::WHITE };
+    theme.ring = theme.primary;
+    theme.accent = if dark {
+        Color32::from_rgb(67, 20, 7)
+    } else {
+        Color32::from_rgb(255, 237, 213)
+    };
     theme.card_foreground = theme.foreground;
     theme.popover_foreground = theme.foreground;
     theme.secondary_foreground = theme.foreground;
@@ -107,9 +117,9 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
         }
         ctx.set_fonts(fonts);
         ctx.all_styles_mut(|s| {
-            s.spacing.item_spacing.y = 6.0;
+            s.spacing.item_spacing.y = 4.0;
             s.spacing.window_margin = egui::Margin::same(12);
-            s.spacing.interact_size.y = 28.0;
+            s.spacing.interact_size.y = 36.0;
             s.spacing.button_padding = egui::vec2(8.0, 4.0);
             s.text_styles
                 .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
@@ -148,9 +158,9 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
             s.visuals.widgets.active.bg_stroke.width = 2.0;
             s.visuals.widgets.open.bg_stroke = egui::Stroke::new(2.0, theme.ring);
             s.visuals.selection.bg_fill = if dark {
-                Color32::from_rgb(49, 75, 108)
+                Color32::from_rgb(124, 45, 18)
             } else {
-                Color32::from_rgb(202, 225, 250)
+                Color32::from_rgb(255, 214, 170)
             };
             s.visuals.selection.stroke = egui::Stroke::new(1.0, theme.foreground);
             s.visuals.text_cursor.stroke.color = theme.foreground;
@@ -200,14 +210,6 @@ impl Button {
         self.inner = self.inner.fixed_width(width);
         self
     }
-    fn icon(mut self, icon: LucideIcon) -> Self {
-        self.inner = self.inner.icon(icon);
-        self
-    }
-    fn selected(mut self, selected: bool) -> Self {
-        self.inner = self.inner.selected(selected);
-        self
-    }
 }
 
 impl egui::Widget for Button {
@@ -220,7 +222,7 @@ impl egui::Widget for Button {
                 self.label.clone(),
             )
         });
-        response
+        disabled_cursor(response)
     }
 }
 
@@ -240,9 +242,14 @@ pub(crate) struct IconButton {
     has_popup: bool,
     variant: ButtonVariant,
     width: Option<f32>,
+    selected: bool,
 }
 
 impl IconButton {
+    pub(crate) fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
     pub(crate) fn fixed_width(mut self, width: f32) -> Self {
         self.width = Some(width);
         self
@@ -259,14 +266,22 @@ impl IconButton {
 
 impl egui::Widget for IconButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let original = ui.ctx().shadcn_theme();
+        let mut accent_theme = original.clone();
+        accent_theme.foreground = original.primary;
+        accent_theme.accent_foreground = original.primary;
+        let key = egui::Id::NULL;
+        ui.ctx().data_mut(|d| d.insert_temp(key, accent_theme));
         let mut button = FunctoraButton::icon_only(self.icon)
             .variant(self.variant)
             .size(ComponentSize::Xs)
-            .fixed_width(self.width.unwrap_or(32.0));
+            .fixed_width(self.width.unwrap_or(32.0))
+            .selected(self.selected);
         if let Some(width) = self.width {
             button = button.fixed_width(width);
         }
         let response = ui.add(button);
+        ui.ctx().data_mut(|d| d.insert_temp(key, original));
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &self.label)
         });
@@ -275,7 +290,7 @@ impl egui::Widget for IconButton {
                 node.set_has_popup(egui::accesskit::HasPopup::Menu);
             });
         }
-        response.on_hover_text(self.label)
+        disabled_cursor(response).on_hover_text(self.label)
     }
 }
 
@@ -298,6 +313,7 @@ pub(crate) fn icon_button(text: impl AsRef<str>, name: &str) -> IconButton {
         has_popup: false,
         variant: ButtonVariant::Ghost,
         width: None,
+        selected: false,
     }
 }
 
@@ -311,20 +327,30 @@ pub(crate) fn checkbox(
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, &text)
     });
+    disabled_cursor(response)
+}
+
+pub(crate) fn disabled_cursor(response: egui::Response) -> egui::Response {
+    if !response.enabled() && response.contains_pointer() {
+        response.ctx.set_cursor_icon(egui::CursorIcon::NotAllowed);
+    }
     response
 }
 
 /// Compact desktop field; functora's Input has no size override below 800pt.
 pub(crate) fn input(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
-    let padding = egui::vec2(8.0, 6.0);
+    let padding = egui::vec2(8.0, 8.0);
     let width = ui.available_width().max(1.0);
     let theme = ui.ctx().shadcn_theme();
-    ui.add(
-        egui::TextEdit::singleline(value)
-            .font(egui::FontId::proportional(14.0))
-            .margin(padding)
-            .text_color(theme.foreground)
-            .desired_width(width),
+    disabled_cursor(
+        ui.add(
+            egui::TextEdit::singleline(value)
+                .font(egui::FontId::proportional(14.0))
+                .margin(padding)
+                .text_color(theme.foreground)
+                .desired_width(width)
+                .min_size(egui::vec2(0.0, 36.0)),
+        ),
     )
 }
 
@@ -345,8 +371,8 @@ pub(crate) fn select(
     // Keep native field behavior and use the same palette at desktop density.
     let mut response = ui
         .scope(|ui| {
-            ui.spacing_mut().interact_size.y = 28.0;
-            ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
+            ui.spacing_mut().interact_size.y = 36.0;
+            ui.spacing_mut().button_padding = egui::vec2(8.0, 8.0);
             ui.add_enabled_ui(!choices.is_empty(), |ui| {
                 egui::ComboBox::from_id_salt(id)
                     .width((ui.available_width() - ui.spacing().button_padding.x * 2.0).max(1.0))
@@ -394,24 +420,23 @@ pub(crate) fn select(
         info.current_text_value = choices.get(*value).cloned();
         info
     });
-    response
+    disabled_cursor(response)
 }
 
 pub(crate) fn progress(ui: &mut egui::Ui, value: f32, text: impl AsRef<str>) -> egui::Response {
-    let label = ui.label(RichText::new(text.as_ref()).strong());
     let theme = ui.ctx().shadcn_theme();
-    let mut progress_theme = theme.clone();
-    progress_theme.primary = if value > 0.0 {
-        RUFUS_GREEN
-    } else {
-        theme.muted_foreground
-    };
-    // Progress 0.2 has no fill builder; scope only its token lookup, not egui styles.
-    let key = egui::Id::NULL;
-    ui.ctx().data_mut(|d| d.insert_temp(key, progress_theme));
-    let response = ui.add(Progress::new(value));
-    ui.ctx().data_mut(|d| d.insert_temp(key, theme));
-    response.labelled_by(label.id)
+    ui.scope(|ui| {
+        ui.visuals_mut().extreme_bg_color = theme.muted;
+        ui.add(
+            egui::ProgressBar::new(value.clamp(0.0, 1.0))
+                .desired_width(ui.available_width())
+                .desired_height(28.0)
+                .fill(theme.accent)
+                .text(RichText::new(text.as_ref()).color(theme.foreground))
+                .corner_radius(4),
+        )
+    })
+    .inner
 }
 
 pub(crate) fn spinner(ui: &mut egui::Ui) -> egui::Response {
@@ -521,37 +546,33 @@ fn script_fonts() -> egui::FontDefinitions {
 
 /// Keep Rufus' heading-and-rule hierarchy without custom painting.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let heading = egui::FontFamily::Name("Inter Heading".into());
-        let family = if ui
-            .ctx()
-            .fonts(|f| f.definitions().families.contains_key(&heading))
-        {
-            heading
-        } else {
-            egui::FontFamily::Proportional
-        };
-        ui.label(RichText::new(title).font(egui::FontId::new(18.0, family)));
-        separator(ui);
+    ui.add_space(2.0);
+    ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 22.0;
+        ui.horizontal(|ui| {
+            let heading = egui::FontFamily::Name("Inter Heading".into());
+            let family = if ui
+                .ctx()
+                .fonts(|f| f.definitions().families.contains_key(&heading))
+            {
+                heading
+            } else {
+                egui::FontFamily::Proportional
+            };
+            ui.label(RichText::new(title).font(egui::FontId::new(18.0, family)));
+            separator(ui);
+        });
     });
 }
 
 pub(crate) fn toggle(ui: &mut egui::Ui, open: &mut bool, what: &str) {
     let text = tf(if *open { "MSG_122" } else { "MSG_121" }, &[what]);
-    let icon = if *open {
-        LucideIcon::ChevronUp
-    } else {
-        LucideIcon::ChevronDown
-    };
-    if ui
-        .add(
-            button(text)
-                .variant(ButtonVariant::Ghost)
-                .icon(icon)
-                .selected(*open),
-        )
-        .clicked()
+    if menu_item(
+        ui,
+        format!("{}  {text}", if *open { "⌃" } else { "⌄" }),
+        false,
+    )
+    .clicked()
     {
         *open = !*open;
     }
@@ -696,6 +717,7 @@ pub(crate) fn menu_item(
 ) -> egui::Response {
     let theme = ui.ctx().shadcn_theme();
     ui.scope(|ui| {
+        ui.spacing_mut().interact_size.y = 28.0;
         ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
         ui.visuals_mut().selection.bg_fill = theme.accent;
         ui.visuals_mut().selection.stroke = egui::Stroke::new(1.0, theme.foreground);
@@ -786,6 +808,63 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
+    #[test]
+    fn orange_primary_and_focus_ring_have_accessible_contrast() {
+        for (dark, primary) in [
+            (false, Color32::from_rgb(0xc2, 0x41, 0x0c)),
+            (true, Color32::from_rgb(0xfb, 0x92, 0x3c)),
+        ] {
+            let theme = rufus_theme(dark);
+            assert_eq!(theme.primary, primary);
+            assert_eq!(theme.ring, primary);
+            assert!(contrast(theme.primary_foreground, theme.primary) >= 4.5);
+            assert!(contrast(theme.ring, theme.background) >= 3.0);
+        }
+    }
+
+    #[test]
+    fn disabled_controls_show_not_allowed_and_ignore_clicks() {
+        for dark in [false, true] {
+            let mut selected = 0;
+            let mut activated = false;
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(320.0, 240.0))
+                .build_ui(|ui| {
+                    rufus_style(ui.ctx(), dark);
+                    ui.add_enabled_ui(false, |ui| {
+                        activated |= ui.add(button("Disabled action")).clicked();
+                        select(
+                            ui,
+                            "disabled-choice",
+                            &mut selected,
+                            &["First".into(), "Second".into()],
+                            "Disabled selector",
+                        );
+                        activated |= ui.add(icon_button("Checksum", "hash")).clicked();
+                    });
+                });
+            harness.run_steps(3);
+            for label in ["Disabled action", "Disabled selector", "Checksum"] {
+                let node = harness.get_by_label(label);
+                assert!(node.accesskit_node().is_disabled(), "{label}");
+                let center = node.rect().center();
+                harness.hover_at(center);
+                harness.run_steps(3);
+                assert_eq!(
+                    harness.output().platform_output.cursor_icon,
+                    egui::CursorIcon::NotAllowed,
+                    "{label}, dark={dark}"
+                );
+                harness.get_by_label(label).click();
+                harness.run_steps(3);
+                assert!(harness.query_by_label("Second").is_none());
+            }
+            drop(harness);
+            assert_eq!(selected, 0);
+            assert!(!activated);
+        }
+    }
+
     fn contains_field_fill(shape: &egui::epaint::Shape, field: egui::Rect, fill: Color32) -> bool {
         match shape {
             egui::epaint::Shape::Rect(rect) => {
@@ -820,7 +899,7 @@ mod tests {
                     let response = input(ui, &mut value).labelled_by(label.id);
                     response.request_focus();
                     assert!(response.rect.width() <= offered + 0.5);
-                    assert!(response.rect.height() <= 34.0);
+                    assert!(response.rect.height() <= 38.0);
                     ui.ctx().data_mut(|d| {
                         d.insert_temp(egui::Id::new("test-input-rect"), response.rect)
                     });
@@ -832,7 +911,7 @@ mod tests {
                         "Choice",
                     );
                     assert!(selected.rect.width() <= offered + 0.5);
-                    assert!(selected.rect.height() <= 34.0);
+                    assert!(selected.rect.height() <= 38.0);
                 });
             harness.run_steps(3);
             assert!(harness.get_by_label("Volume label").is_focused());
@@ -849,9 +928,9 @@ mod tests {
             assert_eq!(
                 visuals.selection.bg_fill,
                 if dark {
-                    Color32::from_rgb(49, 75, 108)
+                    Color32::from_rgb(124, 45, 18)
                 } else {
-                    Color32::from_rgb(202, 225, 250)
+                    Color32::from_rgb(255, 214, 170)
                 }
             );
             assert!(contrast(visuals.selection.stroke.color, visuals.selection.bg_fill) >= 4.5);
@@ -954,7 +1033,7 @@ mod tests {
     }
 
     #[test]
-    fn progress_does_not_leak_green_tokens() {
+    fn progress_preserves_primary_tokens() {
         let ctx = egui::Context::default();
         rufus_style(&ctx, false);
         let primary = ctx.shadcn_theme().primary;

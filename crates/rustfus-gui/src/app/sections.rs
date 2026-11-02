@@ -31,22 +31,6 @@ impl App {
     pub(super) fn drive_section(&mut self, ui: &mut egui::Ui) {
         section(ui, &t("IDS_DRIVE_PROPERTIES_TXT"));
         let device_label = ui.label(t("IDS_DEVICE_TXT"));
-        if self.scanning {
-            ui.label("Scanning for devices…");
-        } else if let Some(error) = &self.scan_error {
-            ui.label(format!("Device scan failed: {error}"));
-            if ui.add(button("Retry scan")).clicked() {
-                self.retry_scan();
-            }
-            if !self.drives.is_empty() {
-                ui.label("The previous device list is shown below; rescan before continuing.");
-            }
-        } else if self.drives.is_empty() {
-            ui.label("No devices found. Connect a USB drive and rescan.");
-            if ui.add(button("Rescan devices")).clicked() {
-                self.retry_scan();
-            }
-        }
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), 36.0),
             egui::Layout::left_to_right(egui::Align::Center),
@@ -55,7 +39,7 @@ impl App {
                 let mut selected = self.selected.unwrap_or(usize::MAX);
                 let width = (ui.available_width() - 32.0 - ui.spacing().item_spacing.x).max(1.0);
                 let response = ui
-                    .allocate_ui(egui::vec2(width, 32.0), |ui| {
+                    .allocate_ui(egui::vec2(width, 36.0), |ui| {
                         ui.set_width(width);
                         ui.add_enabled_ui(self.scan_ready(), |ui| {
                             select(ui, "device", &mut selected, &choices, "Select a device")
@@ -74,6 +58,20 @@ impl App {
                     self.scan_ready() && self.drive().is_some(),
                     icon_button(t("MSG_304"), "save"),
                 );
+                let save = save.on_disabled_hover_ui(|ui| {
+                    ui.label(if self.scanning {
+                        "Scanning for devices…".to_owned()
+                    } else if let Some(error) = &self.scan_error {
+                        format!("Device scan failed: {error}")
+                    } else if self.drives.is_empty() {
+                        "No devices found. Connect a USB drive and rescan.".to_owned()
+                    } else {
+                        "Select a device before saving its contents.".to_owned()
+                    });
+                    if self.busy.is_none() && ui.add(button("Retry scan")).clicked() {
+                        self.retry_scan();
+                    }
+                });
                 if save.clicked()
                     && let Some(out) = rfd::FileDialog::new()
                         .add_filter(t("MSG_343"), &["vhd"])
@@ -382,7 +380,6 @@ impl App {
 
     pub(super) fn status_section(&mut self, ui: &mut egui::Ui) {
         section(ui, &t("IDS_STATUS_TXT"));
-        ui.add_space(4.0);
         let (fraction, status) = if self.busy.is_some() {
             (self.progress, self.status.clone())
         } else if self.scanning {
@@ -473,7 +470,10 @@ impl App {
                 if check_updates {
                     self.check_updates(ui.ctx(), true);
                 }
-                if ui.add(icon_button(t("MSG_303"), "logs")).clicked() {
+                if ui
+                    .add(icon_button(t("MSG_303"), "logs").selected(self.show_log))
+                    .clicked()
+                {
                     self.show_log = !self.show_log;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {

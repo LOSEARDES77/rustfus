@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-//! START confirmation steps, the Fido download dialog, and the Log/About windows.
+//! START confirmation steps, the Fido download dialog, and the About window.
 
 use super::{App, Dialog, rustfus_name};
 use crate::widgets::{
@@ -373,37 +373,6 @@ impl App {
             self.start_job(ctx);
         }
 
-        let log = &mut self.log;
-        os_window(
-            ctx,
-            "log",
-            &mut self.show_log,
-            &t("IDD_LOG"),
-            [520.0, 300.0],
-            |ui| {
-                ui.horizontal(|ui| {
-                    if ui.add(button(t("IDC_LOG_CLEAR"))).clicked() {
-                        log.clear();
-                    }
-                    if ui.add(button(t("IDC_LOG_SAVE"))).clicked()
-                        && let Some(p) = rfd::FileDialog::new()
-                            .set_file_name("rustfus.log")
-                            .save_file()
-                    {
-                        std::fs::write(p, log.join("\n")).ok();
-                    }
-                });
-                egui::ScrollArea::vertical()
-                    .stick_to_bottom(true)
-                    .show(ui, |ui| {
-                        let text = log.join("\n");
-                        let mut text = text.as_str();
-                        // Functora 0.2 Textarea has no read-only mode; an immutable
-                        // buffer preserves selection without allowing edits.
-                        ui.add(egui::TextEdit::multiline(&mut text).desired_width(f32::INFINITY));
-                    });
-            },
-        );
         os_window(
             ctx,
             "about",
