@@ -15,3 +15,7 @@ publish.workspace = true
 eframe = "0.36"
 rfd = "0.17"
 rustfus-core.workspace = true
+shadcn-egui = "0.7.0"
+
+[dev-dependencies]
+egui_kittest = "0.36.2"

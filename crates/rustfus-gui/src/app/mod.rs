@@ -21,6 +21,26 @@ use std::time::{Duration, Instant};
 
 const MB: u64 = 1 << 20;
 
+type ScanResult = Result<Vec<Drive>, String>;
+
+fn finish_scan(
+    scanning: &mut bool,
+    scan_error: &mut Option<String>,
+    result: ScanResult,
+) -> Option<Vec<Drive>> {
+    *scanning = false;
+    match result {
+        Ok(drives) => {
+            *scan_error = None;
+            Some(drives)
+        }
+        Err(error) => {
+            *scan_error = Some(error);
+            None
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum BootSel {
     Image,
@@ -80,7 +100,10 @@ impl FidoState {
 struct App {
     drives: Vec<Drive>,
     selected: Option<usize>,
-    scan_rx: Receiver<Vec<Drive>>,
+    scan_rx: Receiver<ScanResult>,
+    scanning: bool,
+    scan_error: Option<String>,
+    pending_drives: Option<Vec<Drive>>,
     list_all: Arc<AtomicBool>,
     rescan: Arc<AtomicBool>,
 
@@ -145,16 +168,15 @@ fn spawn_scanner(
     ctx: egui::Context,
     list_all: Arc<AtomicBool>,
     rescan: Arc<AtomicBool>,
-) -> Receiver<Vec<Drive>> {
+) -> Receiver<ScanResult> {
     let (tx, rx) = channel();
     std::thread::spawn(move || {
         let mut last = None;
         loop {
-            if let Ok(d) = drives::list(list_all.load(Ordering::Relaxed))
-                && last.as_ref() != Some(&d)
-            {
-                last = Some(d.clone());
-                if tx.send(d).is_err() {
+            let result = drives::list(list_all.load(Ordering::Relaxed));
+            if last.as_ref() != Some(&result) {
+                last = Some(result.clone());
+                if tx.send(result).is_err() {
                     return;
                 }
                 ctx.request_repaint();
@@ -179,10 +201,27 @@ impl App {
         let list_all = Arc::new(AtomicBool::new(false));
         let rescan = Arc::new(AtomicBool::new(false));
         let saved_policy = update::Settings::load();
-        let mut app = App {
+        let scan_rx = spawn_scanner(cc.egui_ctx.clone(), list_all.clone(), rescan.clone());
+        let mut app = Self::with_inputs(scan_rx, list_all, rescan, saved_policy.clone());
+        if saved_policy.is_some_and(|s| s.is_due(update::now())) {
+            app.check_updates(&cc.egui_ctx, /* manual= */ false);
+        }
+        app
+    }
+
+    fn with_inputs(
+        scan_rx: Receiver<ScanResult>,
+        list_all: Arc<AtomicBool>,
+        rescan: Arc<AtomicBool>,
+        saved_policy: Option<update::Settings>,
+    ) -> Self {
+        App {
             drives: Vec::new(),
             selected: None,
-            scan_rx: spawn_scanner(cc.egui_ctx.clone(), list_all.clone(), rescan.clone()),
+            scan_rx,
+            scanning: true,
+            scan_error: None,
+            pending_drives: None,
             list_all,
             rescan,
             boot: BootSel::Image,
@@ -243,15 +282,20 @@ impl App {
             started: None,
             elapsed: Duration::ZERO,
             height: 0.0,
-        };
-        if saved_policy.is_some_and(|s| s.is_due(update::now())) {
-            app.check_updates(&cc.egui_ctx, /* manual= */ false);
         }
-        app
     }
 
     fn drive(&self) -> Option<&Drive> {
         self.selected.and_then(|i| self.drives.get(i))
+    }
+
+    pub(super) fn retry_scan(&mut self) {
+        self.scanning = true;
+        self.rescan.store(true, Ordering::Relaxed);
+    }
+
+    fn scan_ready(&self) -> bool {
+        !self.scanning && self.scan_error.is_none()
     }
 
     fn set_drives(&mut self, d: Vec<Drive>) {
@@ -346,6 +390,9 @@ impl App {
     }
 
     fn on_start(&mut self) {
+        if !self.scan_ready() {
+            return;
+        }
         self.allow_downloads = false;
         self.replace_c32.clear();
         self.dialog = self.next_dialog(0);
@@ -370,6 +417,10 @@ impl App {
     }
 
     fn start_job(&mut self, ctx: &egui::Context) {
+        // A scan can fail while the confirmation dialog is open.
+        if !self.scan_ready() {
+            return;
+        }
         let Some(drive) = self.drive().cloned() else {
             return;
         };
@@ -468,10 +519,18 @@ impl App {
             self.update_rx = None;
             self.on_update_checked(r);
         }
-        while let Ok(d) = self.scan_rx.try_recv() {
-            if self.busy.is_none() {
-                self.set_drives(d);
+        while let Ok(result) = self.scan_rx.try_recv() {
+            if let Some(drives) = finish_scan(&mut self.scanning, &mut self.scan_error, result) {
+                self.pending_drives = Some(drives);
             }
+        }
+        if self.busy.is_none()
+            && let Some(drives) = self.pending_drives.take()
+        {
+            self.set_drives(drives);
+        }
+        if !matches!(self.dialog, Dialog::Hash(..)) {
+            self.hash_rx = None;
         }
         if let Some(rx) = &self.hash_rx {
             while let Ok((p, h)) = rx.try_recv() {
@@ -506,7 +565,13 @@ impl App {
                         }
                     }
                     self.busy = None;
-                    self.rescan.store(true, Ordering::Relaxed);
+                    self.retry_scan();
+                    // Apply a scan received during the job even if the next scan is unchanged.
+                    if let Some(drives) = self.pending_drives.take() {
+                        let done = self.done;
+                        self.set_drives(drives);
+                        self.done = done;
+                    }
                     return;
                 }
             }
@@ -582,6 +647,8 @@ impl eframe::App for App {
             ui.horizontal(|ui| {
                 let status = match (self.busy.is_some(), self.done) {
                     (true, _) => self.status.clone(),
+                    (false, _) if self.scanning => "Scanning for devices…".into(),
+                    (false, _) if self.scan_error.is_some() => "Device scan failed".into(),
                     (false, Some(true)) => "DONE".into(),
                     (false, Some(false)) => t("MSG_212"),
                     (false, None) => tf(
@@ -601,22 +668,38 @@ impl eframe::App for App {
                         .unwrap_or(self.elapsed)
                         .as_secs();
                     ui.monospace(format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60));
-                    ui.separator();
+                    ui.add(shadcn_egui::components::separator::Separator::new()
+                        .orientation(shadcn_egui::components::separator::SeparatorOrientation::Vertical));
                 });
             });
         });
-        let bottom = egui::CentralPanel::default_margins()
+        let content_height = egui::CentralPanel::default_margins()
             .show(ui, |ui| {
-                ui.add_enabled_ui(self.busy.is_none(), |ui| {
-                    self.drive_section(ui);
-                    self.format_section(ui);
-                });
-                self.status_section(ui);
-                ui.cursor().min.y
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        ui.add_enabled_ui(self.busy.is_none(), |ui| {
+                            self.drive_section(ui);
+                            self.format_section(ui);
+                        });
+                        self.status_section(ui);
+                    })
+                    .content_size
+                    .y
             })
             .inner;
         // Like Rufus, grow or shrink the window with the advanced sections.
-        let want = bottom + 44.0;
+        let max_height = ctx.input(|i| {
+            let viewport = i.viewport();
+            let decoration = viewport
+                .outer_rect
+                .zip(viewport.inner_rect)
+                .map(|(outer, inner)| (outer.height() - inner.height()).max(0.0))
+                .unwrap_or(32.0);
+            // Leave room for the desktop's menu bar and taskbar/dock.
+            (viewport.monitor_size.map_or(768.0, |size| size.y) - decoration - 80.0).max(100.0)
+        });
+        let want = (content_height + 60.0).min(max_height);
         if (want - self.height).abs() > 1.0 {
             self.height = want;
             // A fixed-size window only resizes when its size limits move too.
@@ -652,4 +735,63 @@ pub fn run() -> eframe::Result {
         options,
         Box::new(|cc| Ok(Box::new(App::new(cc)))),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn drive() -> Drive {
+        Drive {
+            path: "test-device".into(),
+            name: "Test USB".into(),
+            size: 8_000_000_000,
+            serial: Some("test-serial".into()),
+        }
+    }
+
+    #[test]
+    fn first_empty_scan_is_a_success_not_an_error() {
+        let mut scanning = true;
+        let mut error = None;
+        let drives = finish_scan(&mut scanning, &mut error, Ok(vec![]));
+        assert_eq!(drives, Some(vec![]));
+        assert!(!scanning);
+        assert_eq!(error, None);
+    }
+
+    #[test]
+    fn first_failed_scan_finishes_scanning_and_exposes_error() {
+        let mut scanning = true;
+        let mut error = None;
+        assert_eq!(
+            finish_scan(&mut scanning, &mut error, Err("Permission denied".into())),
+            None
+        );
+        assert!(!scanning);
+        assert_eq!(error.as_deref(), Some("Permission denied"));
+    }
+
+    #[test]
+    fn transient_failure_preserves_drives_until_successful_empty_scan() {
+        let mut scanning = true;
+        let mut error = None;
+        let mut drives = finish_scan(&mut scanning, &mut error, Ok(vec![drive()])).unwrap();
+        let result = finish_scan(&mut scanning, &mut error, Err("Scan failed".into()));
+        if let Some(updated) = result {
+            drives = updated;
+        }
+        assert_eq!(drives, vec![drive()]);
+        assert!(error.is_some());
+
+        // Recovery must be delivered even when it matches the last successful list.
+        let recovered = finish_scan(&mut scanning, &mut error, Ok(drives.clone()));
+        assert_eq!(recovered, Some(vec![drive()]));
+        assert_eq!(error, None);
+
+        drives = finish_scan(&mut scanning, &mut error, Ok(vec![])).unwrap();
+        assert!(drives.is_empty());
+        assert!(!scanning);
+        assert_eq!(error, None);
+    }
 }

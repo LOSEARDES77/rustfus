@@ -1,5 +1,6 @@
 [workspace]
 members = ["crates/*"]
+exclude = ["vendor/*"]
 resolver = "3"
 
 [workspace.package]
@@ -18,6 +19,12 @@ publish = false
 rustfus-core = { path = "crates/rustfus-core" }
 rustfus-gui = { path = "crates/rustfus-gui" }
 clap = { version = "4.6.7", features = ["derive"] }
+
+[patch.crates-io]
+shadcn-egui = { path = "vendor/shadcn-egui" }
+shadcn-egui-core = { path = "vendor/shadcn-egui-core" }
+shadcn-egui-font-inter = { path = "vendor/shadcn-egui-font-inter" }
+shadcn-egui-icons-lucide = { path = "vendor/shadcn-egui-icons-lucide" }
 
 [profile.release]
 lto = true
