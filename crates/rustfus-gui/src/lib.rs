@@ -8,6 +8,7 @@ extern crate gpui_kit as gpui;
 #[cfg(target_os = "macos")]
 mod about;
 mod assets;
+mod backdrop;
 mod checksums;
 mod dialogs;
 mod download;
@@ -15,6 +16,7 @@ mod model;
 mod theme;
 mod ui;
 
+use gpui_kit::component::TitleBar;
 use gpui_kit::{
     AppContext, Bounds, KeyBinding, Menu, MenuItem, TitlebarOptions, WindowBounds, WindowOptions,
     px, size,
@@ -40,12 +42,14 @@ pub fn run() -> anyhow::Result<()> {
             let result = gpui_kit::open_window(
                 WindowOptions {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
+                    window_background: backdrop::appearance(true),
                     window_min_size: Some(size(px(480.), px(480.))),
                     titlebar: Some(TitlebarOptions {
                         title: Some(concat!("Rustfus v", env!("CARGO_PKG_VERSION")).into()),
-                        ..Default::default()
+                        traffic_light_position: Some(gpui_kit::point(px(16.), px(16.))),
+                        ..TitleBar::title_bar_options()
                     }),
-                    ..Default::default()
+                    ..TitleBar::window_options()
                 },
                 cx,
                 |window, cx| cx.new(|cx| ui::RustfusView::new(window, cx)),
@@ -58,6 +62,8 @@ pub fn run() -> anyhow::Result<()> {
                     return;
                 }
             };
+
+            let _ = window.update(cx, |_, window, cx| backdrop::apply(true, window, cx));
 
             let quit_requested = Rc::new(Cell::new(false));
             let quit_for_action = quit_requested.clone();

@@ -36,7 +36,7 @@ were written from the format specifications, using Rufus' bundled libcdio
 
 ### Interface icons
 
-`res/icons/*.svg` contains 40 selected outline SVG assets from
+`res/icons/*.svg` contains 41 selected outline SVG assets from
 `@tabler/icons` 3.50.0. No full icon catalog or font bundle is embedded.
 Tabler Icons is MIT licensed; the upstream notice is reproduced in
 [res/icons/LICENSE](res/icons/LICENSE).

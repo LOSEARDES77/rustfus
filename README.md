@@ -61,6 +61,22 @@ The code is split into a workspace:
 | `crates/rustfus-core` | Engine: drive listing, image analysis, partitioning, file systems, boot code, downloads |
 | `crates/rustfus-gui` | The Rufus-style GPUI Kit interface |
 
+### Window appearance
+
+On macOS and Windows, the main window uses native background blur with strongly
+tinted GPUI Kit cards for Drive Properties, Format Options, and Status. Form
+controls remain solid for readability. Use
+**Theme → Window blur** in the top-right title-bar toolbar to switch to an
+opaque background. Language and update settings are also in that toolbar.
+The custom Kit title bar retains platform window controls and dragging.
+Light, Dark, and System modes apply to the content and window appearance.
+Blur availability and appearance depend on the operating system and compositor;
+other platforms use an opaque background. The downloader and Checksums windows
+remain solid.
+The main form has no page or card scrolling. Its window fits the measured
+content as options expand or collapse; tall forms use side-by-side cards on
+wider displays and compact spacing when needed. Menus and log text can scroll.
+
 ## Command line
 
 Run `rustfus` without arguments for the GUI, or with a command:

@@ -8,6 +8,10 @@ pub struct Assets;
 
 const ICONS: &[(&str, &[u8])] = &[
     (
+        "icons/language.svg",
+        include_bytes!("../../../res/icons/language.svg"),
+    ),
+    (
         "icons/ban.svg",
         include_bytes!("../../../res/icons/ban.svg"),
     ),
@@ -197,8 +201,8 @@ mod tests {
 
     #[test]
     fn selected_assets_are_unique_svg_documents() {
-        assert_eq!(ICONS.len(), 40);
-        assert!(ICONS.len() <= 40);
+        assert_eq!(ICONS.len(), 41);
+        assert!(ICONS.len() <= 41);
         let mut paths = HashSet::new();
         for &(path, bytes) in ICONS {
             assert!(paths.insert(path), "duplicate asset: {path}");

@@ -7,18 +7,20 @@ use std::{path::PathBuf, sync::atomic::Ordering};
 use crate::assets::icon;
 use crate::model::{BootSel, Dialog, Model};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, WindowExt,
+    ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, TitleBar, WindowExt,
     button::{Button, ButtonVariants, DropdownButton},
     checkbox::Checkbox,
+    group_box::{GroupBox, GroupBoxVariants},
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
     select::{SearchableVec, Select, SelectEvent, SelectState},
     slider::{Slider, SliderEvent, SliderState},
 };
 use gpui_kit::{
-    AnyWindowHandle, App, AppContext, Context, Entity, ExternalPaths, Focusable, IntoElement,
-    ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Task, Window,
-    div, prelude::*, px, relative, rgb,
+    AnyWindowHandle, App, AppContext, Context, Entity, ExternalPaths, Focusable,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, PathPromptOptions, Pixels, Render,
+    SharedString, Size, StyleRefinement, Styled, Subscription, Task, Window, div, prelude::*, px,
+    relative, rgb, size,
 };
 use rustfus_core::{
     image,
@@ -26,6 +28,9 @@ use rustfus_core::{
     ops::{Fs, Scheme, Target},
 };
 
+use gpui_kit::base::ElementExt as _;
+
+const TITLEBAR_HEIGHT: f32 = 48.;
 const MB: u64 = 1 << 20;
 const DEVICE: usize = 0;
 const BOOT: usize = 1;
@@ -111,6 +116,10 @@ pub(crate) struct RustfusView {
     persistence: Entity<SliderState>,
     persistence_max: u64,
     theme: Option<ThemeMode>,
+    blur: bool,
+    columns: bool,
+    compact: bool,
+    last_fit: Option<Size<Pixels>>,
     downloader: Option<AnyWindowHandle>,
     checksums: Option<(PathBuf, AnyWindowHandle)>,
     picker: Option<Task<()>>,
@@ -185,6 +194,10 @@ impl RustfusView {
             persistence,
             persistence_max: 0,
             theme: None,
+            blur: crate::backdrop::SUPPORTED,
+            columns: false,
+            compact: false,
+            last_fit: None,
             downloader: None,
             checksums: None,
             picker: None,
@@ -200,6 +213,48 @@ impl RustfusView {
         self.refresh_controls(window, cx);
         // Retained field entities are never rebuilt by this refresh.
         cx.notify();
+    }
+
+    fn fit_content(
+        &mut self,
+        measured: Size<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if window.is_fullscreen() || window.is_maximized() {
+            return;
+        }
+        let viewport = window.viewport_size();
+        let measured_width = f32::from(measured.width);
+        let expected_width = f32::from(viewport.width).min(if self.columns { 1200. } else { 960. });
+        if (measured_width - expected_width).abs() > 2. {
+            return;
+        }
+        let available = window
+            .display(cx)
+            .map(|display| display.visible_bounds().size)
+            .unwrap_or(viewport);
+        let fit = fit_form(
+            f32::from(measured.height),
+            self.last_fit.map_or(f32::from(viewport.width), |size| f32::from(size.width)),
+            f32::from(available.width),
+            f32::from(available.height),
+            self.columns,
+            self.compact,
+        );
+        if self.columns != fit.columns || self.compact != fit.compact {
+            self.columns = fit.columns;
+            self.compact = fit.compact;
+            cx.notify();
+        }
+        let target = size(px(fit.width), px(fit.height));
+        if self.last_fit != Some(target)
+            && ((f32::from(viewport.height - target.height)).abs() > 1.
+                || (f32::from(viewport.width - target.width)).abs() > 1.)
+        {
+            self.last_fit = Some(target);
+            window.resize(target);
+        }
     }
 
     fn choose(&mut self, field: usize, value: usize) {
@@ -621,16 +676,7 @@ impl Render for RustfusView {
                 let _ = cx;
                 menu
             });
-        let mut body = div()
-            .id("main-fields")
-            .flex()
-            .flex_col()
-            .flex_1()
-            .min_h_0()
-            .overflow_y_scroll()
-            // Kit's 3px outer focus ring needs room inside the scroll clip.
-            .p(px(4.))
-            .gap_3()
+        let mut drive = section_card("drive-properties", self.blur, self.compact, cx)
             .child(
                 div()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -690,9 +736,9 @@ impl Render for RustfusView {
                     .child(source),
             );
         if m.iso_mode() && m.report.windows {
-            body = body.child(self.select(IMAGE_OPTION, t("IDS_IMAGE_OPTION_TXT"), busy, cx));
+            drive = drive.child(self.select(IMAGE_OPTION, t("IDS_IMAGE_OPTION_TXT"), busy, cx));
             if !cfg!(windows) {
-                body = body.child(
+                drive = drive.child(
                     div()
                         .text_sm()
                         .child("Windows To Go requires DISM and bcdboot on Windows."),
@@ -700,7 +746,7 @@ impl Render for RustfusView {
             }
         }
         if m.iso_mode() && m.report.persistence_capable() {
-            body = body.child(
+            drive = drive.child(
                 div()
                     .flex()
                     .flex_col()
@@ -713,7 +759,7 @@ impl Render for RustfusView {
                     ),
             );
         }
-        body = body
+        drive = drive
             .child(
                 div()
                     .flex()
@@ -749,7 +795,7 @@ impl Render for RustfusView {
                     })),
             );
         if m.adv_drive {
-            body = body
+            drive = drive
                 .child(self.checkbox(
                     "all-usb",
                     t("IDC_LIST_USB_HDD"),
@@ -786,7 +832,7 @@ impl Render for RustfusView {
                     cx,
                 ));
         }
-        body = body
+        let mut format = section_card("format-options", self.blur, self.compact, cx)
             .child(
                 div()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -835,7 +881,7 @@ impl Render for RustfusView {
                     })),
             );
         if m.adv_format {
-            body = body
+            format = format
                 .child(self.checkbox(
                     "quick",
                     t("IDC_QUICK_FORMAT"),
@@ -862,10 +908,16 @@ impl Render for RustfusView {
                 ))
                 .child(self.select(PASSES, "Bad block passes".into(), busy || !m.bad_blocks, cx));
         }
+        let body = div()
+            .flex()
+            .when(!self.columns, |this| this.flex_col())
+            .flex_shrink_0()
+            .gap_3()
+            .child(div().flex_1().min_w_0().child(drive))
+            .child(div().flex_1().min_w_0().child(format));
         let language_weak = weak.clone();
         let language = Button::new("language")
-            .small()
-            .icon(icon("settings"))
+            .icon(icon("language"))
             .accessibility_label("Language")
             .tooltip(t("MSG_273"))
             .dropdown_menu(move |mut menu, _, _| {
@@ -889,9 +941,9 @@ impl Render for RustfusView {
             });
         let theme_weak = weak.clone();
         let current_theme = self.theme;
+        let blur = self.blur;
         let theme = Button::new("theme")
-            .small()
-            .icon(icon("sun"))
+            .icon(icon(if cx.theme().is_dark() { "moon" } else { "sun" }))
             .accessibility_label("Theme")
             .tooltip("Theme")
             .dropdown_menu(move |mut menu, _, _| {
@@ -913,6 +965,20 @@ impl Render for RustfusView {
                             }),
                     );
                 }
+                if crate::backdrop::SUPPORTED {
+                    let weak = theme_weak.clone();
+                    menu = menu.separator().item(
+                        PopupMenuItem::new("Window blur").checked(blur).on_click(
+                            move |_, window, cx| {
+                                crate::backdrop::apply(!blur, window, cx);
+                                let _ = weak.update(cx, |this, cx| {
+                                    this.blur = !blur;
+                                    cx.notify();
+                                });
+                            },
+                        ),
+                    );
+                }
                 menu
             });
         let update_weak = weak.clone();
@@ -920,8 +986,7 @@ impl Render for RustfusView {
         let betas = m.update.include_betas;
         let checking = m.update_rx.is_some();
         let updates = Button::new("updates")
-            .small()
-            .icon(icon("download"))
+            .icon(icon("refresh-cw"))
             .accessibility_label("Updates")
             .tooltip(if m.update_note.is_empty() {
                 "Updates".into()
@@ -972,13 +1037,37 @@ impl Render for RustfusView {
                         }),
                 )
             });
+        let titlebar = TitleBar::new()
+            .h(px(TITLEBAR_HEIGHT))
+            .when(cfg!(target_os = "macos"), |this| this.pl(px(88.)))
+            .bg(gpui_kit::transparent_black())
+            .border_b_0()
+            .child(
+                div()
+                    .min_w_0()
+                    .flex_1()
+                    .truncate()
+                    .text_sm()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(concat!("Rustfus v", env!("CARGO_PKG_VERSION"))),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_2()
+                    .flex_shrink_0()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(language)
+                    .child(updates)
+                    .child(theme),
+            );
         let footer = div()
             .flex()
             .items_center()
             .gap_2()
-            .child(language)
-            .child(theme)
-            .child(updates)
             .child(
                 Button::new("about")
                     .small()
@@ -1029,82 +1118,80 @@ impl Render for RustfusView {
             .map(|s| s.elapsed())
             .unwrap_or(m.elapsed)
             .as_secs();
-        let mut view = div()
-            .flex()
-            .flex_col()
-            .size_full()
-            .max_w(px(960.))
-            .min_w_0()
-            .p_4()
-            .gap_3()
-            .child(body)
+        let status_card = section_card("status", self.blur, self.compact, cx)
+            .child(
+                div()
+                    .font_weight(gpui_kit::FontWeight::SEMIBOLD)
+                    .child(t("IDS_STATUS_TXT")),
+            )
+            .child(
+                gpui_kit::base::Progress::new("job-progress")
+                    .value(progress_value)
+                    .accessibility_label(status.clone())
+                    .relative()
+                    .h(px(28.))
+                    .w_full()
+                    .flex_shrink_0()
+                    .overflow_hidden()
+                    .rounded(px(4.))
+                    .border_1()
+                    .border_color(cx.theme().border)
+                    .bg(cx.theme().muted)
+                    .child(
+                        gpui_kit::base::ProgressIndicator::new()
+                            .absolute()
+                            .top_0()
+                            .bottom_0()
+                            .left_0()
+                            .w(relative(progress_value / 100.))
+                            .bg(bar_color),
+                    )
+                    .child(
+                        div()
+                            .relative()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .text_sm()
+                            .text_color(cx.theme().foreground)
+                            .px_2()
+                            .overflow_hidden()
+                            .child(status),
+                    ),
+            )
+            .child(footer)
             .child(
                 div()
                     .flex()
-                    .flex_col()
+                    .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .font_weight(gpui_kit::FontWeight::SEMIBOLD)
-                            .child(t("IDS_STATUS_TXT")),
-                    )
-                    .child(
-                        gpui_kit::base::Progress::new("job-progress")
-                            .value(progress_value)
-                            .accessibility_label(status.clone())
-                            .relative()
-                            .h(px(28.))
-                            .w_full()
-                            .flex_shrink_0()
-                            .overflow_hidden()
-                            .rounded(px(4.))
-                            .border_1()
-                            .border_color(cx.theme().border)
-                            .bg(cx.theme().muted)
-                            .child(
-                                gpui_kit::base::ProgressIndicator::new()
-                                    .absolute()
-                                    .top_0()
-                                    .bottom_0()
-                                    .left_0()
-                                    .w(relative(progress_value / 100.))
-                                    .bg(bar_color),
-                            )
-                            .child(
-                                div()
-                                    .relative()
-                                    .size_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_sm()
-                                    .text_color(cx.theme().foreground)
-                                    .px_2()
-                                    .overflow_hidden()
-                                    .child(status),
-                            ),
-                    ),
+                    .text_sm()
+                    .child(div().flex_1().min_w_0().truncate().child(
+                        if busy && !m.current_file.is_empty() {
+                            m.current_file.clone()
+                        } else {
+                            format!("{} device(s)", m.drives.len())
+                        },
+                    ))
+                    .child(div().flex_shrink_0().child(format!(
+                        "{:02}:{:02}:{:02}",
+                        seconds / 3600,
+                        seconds / 60 % 60,
+                        seconds % 60
+                    ))),
             );
-        view = view.child(footer).child(
-            div()
-                .flex()
-                .items_center()
-                .gap_2()
-                .text_sm()
-                .child(div().flex_1().min_w_0().truncate().child(
-                    if busy && !m.current_file.is_empty() {
-                        m.current_file.clone()
-                    } else {
-                        format!("{} device(s)", m.drives.len())
-                    },
-                ))
-                .child(div().flex_shrink_0().child(format!(
-                    "{:02}:{:02}:{:02}",
-                    seconds / 3600,
-                    seconds / 60 % 60,
-                    seconds % 60
-                ))),
-        );
+        let mut view = div()
+            .flex()
+            .flex_col()
+            .w_full()
+            .flex_shrink_0()
+            .max_w(px(if self.columns { 1200. } else { 960. }))
+            .min_w_0()
+            .p_3()
+            .gap_3()
+            .child(body)
+            .child(status_card);
         if m.show_log {
             view = view
                 .child(
@@ -1149,8 +1236,31 @@ impl Render for RustfusView {
         div()
             .size_full()
             .flex()
-            .justify_center()
-            .child(view)
+            .flex_col()
+            .bg(crate::backdrop::tint(cx.theme().background, self.blur))
+            .text_color(cx.theme().foreground)
+            .child(titlebar)
+            .child(
+                div()
+                    .id("main-page")
+                    .w_full()
+                    .flex_none()
+                    .flex()
+                    .justify_center()
+                    .child(view.on_prepaint({
+                        let weak = cx.entity().downgrade();
+                        move |bounds, window, cx| {
+                            let handle = window.window_handle();
+                            cx.defer(move |cx| {
+                                let _ = handle.update(cx, |_, window, cx| {
+                                    let _ = weak.update(cx, |this, cx| {
+                                        this.fit_content(bounds.size, window, cx);
+                                    });
+                                });
+                            });
+                        }
+                    })),
+            )
             .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
                 if this.model.busy.is_none()
                     && let Some(path) = paths.0.first()
@@ -1160,6 +1270,45 @@ impl Render for RustfusView {
                     cx.notify();
                 }
             }))
+    }
+}
+
+fn section_card(id: &'static str, blur: bool, compact: bool, cx: &App) -> GroupBox {
+    GroupBox::new().id(id).fill().flex_shrink_0().content_style(
+        StyleRefinement::default()
+            .bg(crate::backdrop::card_surface(cx.theme().group_box, blur))
+            .border_1()
+            .border_color(cx.theme().border)
+            .rounded(px(12.))
+            .gap(px(if compact { 8. } else { 12. }))
+            .p(px(if compact { 8. } else { 12. })),
+    )
+}
+
+#[derive(Debug, PartialEq)]
+struct FormFit {
+    width: f32,
+    height: f32,
+    columns: bool,
+    compact: bool,
+}
+
+fn fit_form(
+    content: f32,
+    width: f32,
+    screen_width: f32,
+    screen_height: f32,
+    columns: bool,
+    compact: bool,
+) -> FormFit {
+    let max_height = (screen_height - 16.).max(320.);
+    let desired = content.ceil() + TITLEBAR_HEIGHT + 2.;
+    let widen = desired > max_height && !columns && screen_width >= 1040.;
+    FormFit {
+        width: if widen { 1040. } else { width },
+        height: desired.min(max_height).max(480.).min(max_height),
+        columns: columns || widen,
+        compact: compact || (desired > max_height && !widen),
     }
 }
 
@@ -1224,6 +1373,29 @@ fn bad_block_mode(i: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn form_height_fits_the_measured_content() {
+        let collapsed = fit_form(640., 600., 1440., 1000., false, false);
+        assert_eq!(collapsed.height, 690.);
+        assert!(!collapsed.columns);
+        let expanded = fit_form(830., 600., 1440., 1000., false, false);
+        assert_eq!(expanded.height, 880.);
+        let collapsed_again = fit_form(640., 600., 1440., 1000., false, false);
+        assert_eq!(collapsed_again.height, collapsed.height);
+    }
+
+    #[test]
+    fn tall_forms_widen_before_using_compact_spacing() {
+        let wide = fit_form(980., 600., 1440., 900., false, false);
+        assert_eq!(wide.width, 1040.);
+        assert!(wide.columns);
+        assert!(!wide.compact);
+        assert!(wide.height <= 884.);
+        let compact = fit_form(980., 600., 900., 900., false, false);
+        assert!(compact.compact);
+        assert!(!compact.columns);
+    }
+
     #[test]
     fn action_casing_only_changes_shouting() {
         assert_eq!(action_label("  SELECT  "), "Select");

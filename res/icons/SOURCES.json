@@ -43,6 +43,7 @@
     "window-maximize": "square",
     "window-minimize": "minus",
     "window-restore": "copy",
-    "x": "x"
+    "x": "x",
+    "language": "language"
   }
 }
