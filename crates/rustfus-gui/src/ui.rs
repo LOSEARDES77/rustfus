@@ -7,7 +7,7 @@ use std::{path::PathBuf, sync::atomic::Ordering};
 use crate::assets::icon;
 use crate::model::{BootSel, Dialog, Model};
 use gpui_kit::component::{
-    ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, TitleBar, WindowExt,
+    ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, TitleBar,
     button::{Button, ButtonVariants, DropdownButton},
     checkbox::Checkbox,
     group_box::{GroupBox, GroupBoxVariants},
@@ -29,6 +29,8 @@ use rustfus_core::{
 };
 
 use gpui_kit::base::ElementExt as _;
+#[cfg(not(target_os = "macos"))]
+use gpui_kit::component::WindowExt;
 
 const TITLEBAR_HEIGHT: f32 = 48.;
 const MB: u64 = 1 << 20;
@@ -215,12 +217,7 @@ impl RustfusView {
         cx.notify();
     }
 
-    fn fit_content(
-        &mut self,
-        measured: Size<Pixels>,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn fit_content(&mut self, measured: Size<Pixels>, window: &mut Window, cx: &mut Context<Self>) {
         if window.is_fullscreen() || window.is_maximized() {
             return;
         }
@@ -236,7 +233,8 @@ impl RustfusView {
             .unwrap_or(viewport);
         let fit = fit_form(
             f32::from(measured.height),
-            self.last_fit.map_or(f32::from(viewport.width), |size| f32::from(size.width)),
+            self.last_fit
+                .map_or(f32::from(viewport.width), |size| f32::from(size.width)),
             f32::from(available.width),
             f32::from(available.height),
             self.columns,
@@ -309,9 +307,17 @@ impl RustfusView {
 
     pub(crate) fn show_about(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
-        if crate::about::show().is_ok() {
-            return;
+        {
+            // AppKit can synchronously send focus events while creating its panel.
+            // Leave the GPUI entity/window update before invoking it.
+            cx.defer(|_| {
+                if let Err(error) = crate::about::show() {
+                    eprintln!("Could not show About Rustfus: {error}");
+                }
+            });
+            let _ = window;
         }
+        #[cfg(not(target_os = "macos"))]
         window.open_dialog(cx, |dialog, _, _| {
             dialog
                 .title("About Rustfus")
@@ -447,7 +453,7 @@ impl RustfusView {
         }
     }
 
-    fn open_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn open_image(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.model.busy.is_some() || self.picker.is_some() {
             return;
         }

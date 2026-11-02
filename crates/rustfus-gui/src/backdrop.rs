@@ -14,9 +14,50 @@ pub(crate) fn appearance(enabled: bool) -> WindowBackgroundAppearance {
     }
 }
 
+#[cfg(test)]
+mod contrast_tests {
+    use super::*;
+    use gpui_kit::rgb;
+
+    fn luminance(color: gpui_kit::Rgba) -> f32 {
+        let linear = |channel: f32| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b)
+    }
+
+    fn over_black(color: Hsla) -> gpui_kit::Rgba {
+        let color: gpui_kit::Rgba = color.into();
+        gpui_kit::Rgba {
+            r: color.r * color.a,
+            g: color.g * color.a,
+            b: color.b * color.a,
+            a: 1.,
+        }
+    }
+
+    #[test]
+    fn light_shell_and_cards_preserve_text_contrast_over_black() {
+        // Black is the darkest possible material behind the light theme.
+        let foreground: gpui_kit::Rgba = rgb(0x18181b);
+        for surface in [
+            tint(rgb(0xffffff).into(), true),
+            card_surface(rgb(0xffffff).into(), true),
+        ] {
+            let contrast = (luminance(over_black(surface)) + 0.05) / (luminance(foreground) + 0.05);
+            assert!(contrast >= 4.5, "light text contrast was {contrast}:1");
+        }
+    }
+}
+
 pub(crate) fn tint(background: Hsla, enabled: bool) -> Hsla {
     background.alpha(if enabled && SUPPORTED {
-        if background.l > 0.5 { 0.08 } else { 0.20 }
+        // Light text tokens are dark: retain a light base even over a black desktop.
+        if background.l > 0.5 { 0.80 } else { 0.20 }
     } else {
         1.
     })
@@ -65,11 +106,12 @@ mod tests {
     }
 
     #[test]
-    fn light_mode_does_not_wash_out_the_native_blur() {
+    fn light_mode_retains_a_light_base_without_hiding_native_blur() {
         let light: Hsla = rgb(0xffffff).into();
         if SUPPORTED {
-            assert_eq!(tint(light, true).a, 0.08);
-            assert!(tint(light, true).a < tint(rgb(0x202020).into(), true).a);
+            assert_eq!(tint(light, true).a, 0.80);
+            assert!(tint(light, true).a > tint(rgb(0x202020).into(), true).a);
+            assert!(tint(light, true).a < 1.);
         }
         assert_eq!(tint(light, false).a, 1.);
     }
