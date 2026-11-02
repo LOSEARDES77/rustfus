@@ -1,5 +1,5 @@
 use gpui_kit::component::{Theme, ThemeMode};
-use gpui_kit::{App, Window, rgb};
+use gpui_kit::{App, Window, WindowAppearance, rgb};
 
 /// Call after `gpui_kit::init` so the component theme registry exists.
 pub fn init(cx: &mut App) {
@@ -26,9 +26,29 @@ pub fn apply_orange(cx: &mut App) {
 
 /// `None` follows the supplied window's appearance, or the system before opening one.
 pub fn change_theme(mode: Option<ThemeMode>, window: Option<&mut Window>, cx: &mut App) {
+    cx.set_window_appearance(mode.map(native_appearance));
     match mode {
         Some(mode) => Theme::change(mode, window, cx),
-        None => Theme::sync_system_appearance(window, cx),
+        // A window's appearance is cached until its change event arrives.
+        None => Theme::change(cx.window_appearance(), window, cx),
     }
     apply_orange(cx);
+}
+
+fn native_appearance(mode: ThemeMode) -> WindowAppearance {
+    match mode {
+        ThemeMode::Light => WindowAppearance::Light,
+        ThemeMode::Dark => WindowAppearance::Dark,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_chrome_matches_content_mode() {
+        assert_eq!(native_appearance(ThemeMode::Light), WindowAppearance::Light);
+        assert_eq!(native_appearance(ThemeMode::Dark), WindowAppearance::Dark);
+    }
 }

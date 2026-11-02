@@ -7,7 +7,7 @@ use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Boot, Fs, Job, Msg, Report, Scheme, Target};
 use rustfus_core::update::{self, Release};
-use rustfus_core::{drives, image, iso, loc, net, ops, wtg, wue};
+use rustfus_core::{drives, iso, loc, net, ops, wtg, wue};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -94,7 +94,6 @@ pub(crate) enum Dialog {
         dd: bool,
     },
     Confirm,
-    Hash(Option<[String; 4]>, f32),
     NewVersion(Release),
     Error(String),
 }
@@ -154,7 +153,6 @@ pub(crate) struct Model {
     pub(crate) update_note: String,
 
     pub(crate) busy: Option<(Receiver<Msg>, Arc<AtomicBool>)>,
-    pub(crate) hash_rx: Option<Receiver<(f32, Option<[String; 4]>)>>,
     pub(crate) progress: f32,
     pub(crate) status: String,
     pub(crate) current_file: String,
@@ -207,7 +205,6 @@ impl Model {
     }
 
     pub(crate) fn cancel_dialog(&mut self) {
-        self.hash_rx = None;
         self.confirmation_drive = None;
         self.dialog = Dialog::None;
     }
@@ -364,7 +361,6 @@ impl Model {
             update_manual: false,
             update_note: String::new(),
             busy: None,
-            hash_rx: None,
             progress: 0.0,
             status: String::new(),
             current_file: String::new(),
@@ -638,19 +634,6 @@ impl Model {
         {
             self.set_drives(drives);
         }
-        if !matches!(self.dialog, Dialog::Hash(..)) {
-            self.hash_rx = None;
-        }
-        if let Some(rx) = &self.hash_rx {
-            while let Ok((p, h)) = rx.try_recv() {
-                let done = h.is_some();
-                self.dialog = Dialog::Hash(h, p);
-                if done {
-                    self.hash_rx = None;
-                    break;
-                }
-            }
-        }
         let Some((rx, _)) = &self.busy else { return };
         while let Ok(msg) = rx.try_recv() {
             match msg {
@@ -705,30 +688,6 @@ impl Model {
                 self.dialog = Dialog::Error(format!("{}: {err}", t("MSG_118")));
             }
         }
-    }
-
-    pub(crate) fn compute_hashes(&mut self) {
-        let Some(path) = self.image.clone() else {
-            return;
-        };
-        let (tx, rx) = channel();
-        std::thread::spawn(move || {
-            let never = AtomicBool::new(false);
-            let progress = |p| {
-                tx.send((p, None)).ok();
-            };
-            let h = image::hashes(&path, &progress, &never).unwrap_or_else(|e| {
-                [
-                    tf("MSG_043", &[&e.to_string()]),
-                    String::new(),
-                    String::new(),
-                    String::new(),
-                ]
-            });
-            tx.send((1.0, Some(h))).ok();
-        });
-        self.hash_rx = Some(rx);
-        self.dialog = Dialog::Hash(None, 0.0);
     }
 }
 
@@ -847,24 +806,6 @@ mod tests {
         tx.send(Ok(vec![])).unwrap();
         model.poll();
         assert!(model.selected.is_none());
-    }
-
-    #[test]
-    fn late_hashes_do_not_reopen_dialog() {
-        let (mut model, _scan) = fixture();
-        let (tx, rx) = channel();
-        model.hash_rx = Some(rx);
-        model.dialog = Dialog::Hash(None, 0.0);
-        tx.send((0.25, None)).unwrap();
-        model.poll();
-        assert!(matches!(model.dialog, Dialog::Hash(None, p) if p == 0.25));
-        model.dialog = Dialog::None;
-        tx.send((1.0, Some(std::array::from_fn(|i| i.to_string()))))
-            .unwrap();
-        model.poll();
-        assert!(matches!(model.dialog, Dialog::None));
-        assert!(model.hash_rx.is_none());
-        assert!(tx.send((1.0, None)).is_err());
     }
 
     #[test]

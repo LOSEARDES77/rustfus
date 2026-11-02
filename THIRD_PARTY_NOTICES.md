@@ -36,20 +36,16 @@ were written from the format specifications, using Rufus' bundled libcdio
 
 ### Interface icons
 
-`res/icons/*.svg` is a selection of 40 SVG files copied from the published
-`gpui-kit-assets` 0.8.1 package (Lucide 1.43.0, as recorded in that package's
-`lucide.json`). No full icon catalog or font bundle is embedded. Lucide is
-copyright (c) 2026 Lucide Icons and Contributors, under the ISC license;
-icons derived from Feather also retain Cole Bemis' MIT license. Both notices
-are reproduced in [res/icons/LICENSE](res/icons/LICENSE).
+`res/icons/*.svg` contains 40 selected outline SVG assets from
+`@tabler/icons` 3.50.0. No full icon catalog or font bundle is embedded.
+Tabler Icons is MIT licensed; the upstream notice is reproduced in
+[res/icons/LICENSE](res/icons/LICENSE).
 
-The Kit compatibility path `close.svg` contains Lucide's `x` icon.
-`window-close.svg`, `window-minimize.svg`, `window-maximize.svg`, and
-`window-restore.svg` contain the same package's Lucide `x`, `minus`, `square`,
-and `copy` icons respectively, rather than Kit's platform-specific artwork.
-All SVG bytes are otherwise unchanged. Upstream:
-[Lucide 1.43.0](https://github.com/lucide-icons/lucide/tree/1.43.0),
-[GPUI Kit](https://github.com/longbridge/gpui-kit).
+Asset filenames preserve GPUI Kit's compatibility paths, including menu,
+select, input, spinner, and window-control defaults. The SVG bytes are
+unchanged Tabler originals. The package checksum and filename mappings are
+recorded in [res/icons/SOURCES.json](res/icons/SOURCES.json). Upstream:
+[Tabler Icons](https://github.com/tabler/tabler-icons/tree/v3.50.0).
 
 ### Why GPL-2.0 binaries can ship inside a GPL-3.0 program
 

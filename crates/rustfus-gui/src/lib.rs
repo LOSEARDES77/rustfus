@@ -8,6 +8,7 @@ extern crate gpui_kit as gpui;
 #[cfg(target_os = "macos")]
 mod about;
 mod assets;
+mod checksums;
 mod dialogs;
 mod download;
 mod model;
@@ -41,7 +42,7 @@ pub fn run() -> anyhow::Result<()> {
                     window_bounds: Some(WindowBounds::Windowed(bounds)),
                     window_min_size: Some(size(px(480.), px(480.))),
                     titlebar: Some(TitlebarOptions {
-                        title: Some("Rustfus".into()),
+                        title: Some(concat!("Rustfus v", env!("CARGO_PKG_VERSION")).into()),
                         ..Default::default()
                     }),
                     ..Default::default()

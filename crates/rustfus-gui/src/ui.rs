@@ -8,7 +8,7 @@ use crate::assets::icon;
 use crate::model::{BootSel, Dialog, Model};
 use gpui_kit::component::{
     ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, WindowExt,
-    button::{Button, ButtonGroup, ButtonVariants},
+    button::{Button, ButtonVariants, DropdownButton},
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
@@ -112,6 +112,7 @@ pub(crate) struct RustfusView {
     persistence_max: u64,
     theme: Option<ThemeMode>,
     downloader: Option<AnyWindowHandle>,
+    checksums: Option<(PathBuf, AnyWindowHandle)>,
     picker: Option<Task<()>>,
     pub(crate) poll_task: Option<Task<()>>,
     _subscriptions: Vec<Subscription>,
@@ -120,6 +121,12 @@ pub(crate) struct RustfusView {
 impl RustfusView {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut subscriptions = Vec::new();
+        subscriptions.push(cx.observe_window_appearance(window, |this, window, cx| {
+            if this.theme.is_none() {
+                crate::theme::change_theme(None, Some(window), cx);
+                cx.notify();
+            }
+        }));
         let controls = (0..8)
             .map(|field| {
                 let state = cx.new(|cx| {
@@ -179,6 +186,7 @@ impl RustfusView {
             persistence_max: 0,
             theme: None,
             downloader: None,
+            checksums: None,
             picker: None,
             poll_task: None,
             _subscriptions: subscriptions,
@@ -448,6 +456,34 @@ impl RustfusView {
         }));
     }
 
+    fn show_checksums(&mut self, cx: &mut Context<Self>) {
+        if self.model.busy.is_some() {
+            return;
+        }
+        let Some(path) = self.model.image.clone() else {
+            return;
+        };
+        if let Some((current, handle)) = &self.checksums {
+            if current == &path {
+                if handle
+                    .update(cx, |_, window, _| window.activate_window())
+                    .is_ok()
+                {
+                    return;
+                }
+            } else {
+                let _ = handle.update(cx, |_, window, _| window.remove_window());
+            }
+        }
+        match crate::checksums::open(path.clone(), cx) {
+            Ok(handle) => self.checksums = Some((path, handle)),
+            Err(error) => self
+                .model
+                .log
+                .push(format!("Could not open Checksums: {error}")),
+        }
+    }
+
     fn download(&mut self, cx: &mut Context<Self>) {
         if self.model.busy.is_some() {
             return;
@@ -477,7 +513,7 @@ impl RustfusView {
         }
     }
 
-    fn select(&self, field: usize, label: String, disabled: bool) -> impl IntoElement {
+    fn select(&self, field: usize, label: String, disabled: bool, cx: &App) -> impl IntoElement {
         let leading_icon = match field {
             DEVICE => Some("hard-drive"),
             BOOT => Some("file-image"),
@@ -511,7 +547,7 @@ impl RustfusView {
                                 .flex()
                                 .items_center()
                                 .when(disabled, |this| this.opacity(0.5))
-                                .child(icon(name).small()),
+                                .child(icon(name).small().text_color(cx.theme().primary)),
                         )
                     }),
             )
@@ -547,11 +583,24 @@ impl Render for RustfusView {
         let weak = cx.entity().downgrade();
         let source_weak = weak.clone();
         let source_mode = m.download_mode;
-        let source = Button::new("image-source")
-            .icon(icon("chevron-down"))
-            .accessibility_label("Image source")
-            .tooltip("Image source")
-            .disabled(busy || m.boot != BootSel::Image)
+        let source = DropdownButton::new("image-source")
+            .menu_accessibility_label("Image source")
+            .disabled(busy || m.boot != BootSel::Image || self.picker.is_some())
+            .button(
+                Button::new("select-image")
+                    .label(action_label(&t(if m.download_mode {
+                        "MSG_040"
+                    } else {
+                        "IDC_SELECT"
+                    })))
+                    .on_click(cx.listener(|this, _, w, cx| {
+                        if this.model.download_mode {
+                            this.download(cx);
+                        } else {
+                            this.open_image(w, cx);
+                        }
+                    })),
+            )
             .dropdown_menu(move |mut menu, _, cx| {
                 for (mode, label) in [
                     (false, action_label(&t("IDC_SELECT"))),
@@ -592,7 +641,7 @@ impl Render for RustfusView {
                     .flex()
                     .items_end()
                     .gap_2()
-                    .child(self.select(DEVICE, t("IDS_DEVICE_TXT"), busy || !m.scan_ready()))
+                    .child(self.select(DEVICE, t("IDS_DEVICE_TXT"), busy || !m.scan_ready(), cx))
                     .child(
                         Button::new("retry")
                             .icon(icon("refresh-cw"))
@@ -626,7 +675,7 @@ impl Render for RustfusView {
                     .flex()
                     .items_end()
                     .gap_2()
-                    .child(self.select(BOOT, t("IDS_BOOT_SELECTION_TXT"), busy))
+                    .child(self.select(BOOT, t("IDS_BOOT_SELECTION_TXT"), busy, cx))
                     .child(
                         Button::new("hash")
                             .icon(icon("file-image"))
@@ -634,40 +683,14 @@ impl Render for RustfusView {
                             .accessibility_label(t("MSG_314"))
                             .disabled(busy || !m.image_mode())
                             .on_click(cx.listener(|this, _, _, cx| {
-                                this.model.compute_hashes();
+                                this.show_checksums(cx);
                                 cx.notify();
                             })),
                     )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_0()
-                            .child(
-                                ButtonGroup::new("image-action-group").child(
-                                    Button::new("select-image")
-                                        .label(action_label(&t(if m.download_mode {
-                                            "MSG_040"
-                                        } else {
-                                            "IDC_SELECT"
-                                        })))
-                                        .disabled(
-                                            busy || m.boot != BootSel::Image
-                                                || self.picker.is_some(),
-                                        )
-                                        .on_click(cx.listener(|this, _, w, cx| {
-                                            if this.model.download_mode {
-                                                this.download(cx);
-                                            } else {
-                                                this.open_image(w, cx);
-                                            }
-                                        })),
-                                ),
-                            )
-                            .child(source),
-                    ),
+                    .child(source),
             );
         if m.iso_mode() && m.report.windows {
-            body = body.child(self.select(IMAGE_OPTION, t("IDS_IMAGE_OPTION_TXT"), busy));
+            body = body.child(self.select(IMAGE_OPTION, t("IDS_IMAGE_OPTION_TXT"), busy, cx));
             if !cfg!(windows) {
                 body = body.child(
                     div()
@@ -695,13 +718,25 @@ impl Render for RustfusView {
                 div()
                     .flex()
                     .gap_3()
-                    .child(self.select(SCHEME, t("IDS_PARTITION_TYPE_TXT"), formatting_disabled))
-                    .child(self.select(TARGET, t("IDS_TARGET_SYSTEM_TXT"), formatting_disabled)),
+                    .child(self.select(
+                        SCHEME,
+                        t("IDS_PARTITION_TYPE_TXT"),
+                        formatting_disabled,
+                        cx,
+                    ))
+                    .child(self.select(
+                        TARGET,
+                        t("IDS_TARGET_SYSTEM_TXT"),
+                        formatting_disabled,
+                        cx,
+                    )),
             )
             .child(
                 Button::new("advanced-drive")
                     .small()
                     .ghost()
+                    .flex_none()
+                    .self_start()
                     .icon(icon(if m.adv_drive {
                         "chevron-up"
                     } else {
@@ -769,13 +804,25 @@ impl Render for RustfusView {
                 div()
                     .flex()
                     .gap_3()
-                    .child(self.select(FILESYSTEM, t("IDS_FILE_SYSTEM_TXT"), formatting_disabled))
-                    .child(self.select(CLUSTER, t("IDS_CLUSTER_SIZE_TXT"), formatting_disabled)),
+                    .child(self.select(
+                        FILESYSTEM,
+                        t("IDS_FILE_SYSTEM_TXT"),
+                        formatting_disabled,
+                        cx,
+                    ))
+                    .child(self.select(
+                        CLUSTER,
+                        t("IDS_CLUSTER_SIZE_TXT"),
+                        formatting_disabled,
+                        cx,
+                    )),
             )
             .child(
                 Button::new("advanced-format")
                     .small()
                     .ghost()
+                    .flex_none()
+                    .self_start()
                     .icon(icon(if m.adv_format {
                         "chevron-up"
                     } else {
@@ -813,7 +860,7 @@ impl Render for RustfusView {
                     |m, v| m.bad_blocks = v,
                     cx,
                 ))
-                .child(self.select(PASSES, "Bad block passes".into(), busy || !m.bad_blocks));
+                .child(self.select(PASSES, "Bad block passes".into(), busy || !m.bad_blocks, cx));
         }
         let language_weak = weak.clone();
         let language = Button::new("language")
@@ -969,13 +1016,6 @@ impl Render for RustfusView {
                     .label(action_label(&t("MSG_007")))
                     .disabled(!busy)
                     .on_click(cx.listener(|this, _, _, _| this.model.cancel_job())),
-            )
-            .child(
-                Button::new("close")
-                    .small()
-                    .label(action_label(&t("IDCANCEL")))
-                    .disabled(busy)
-                    .on_click(|_, w, _| w.remove_window()),
             );
         let status = m.progress_label();
         let progress_value = m.progress_value();
@@ -993,6 +1033,8 @@ impl Render for RustfusView {
             .flex()
             .flex_col()
             .size_full()
+            .max_w(px(960.))
+            .min_w_0()
             .p_4()
             .gap_3()
             .child(body)
@@ -1104,15 +1146,20 @@ impl Render for RustfusView {
                         ),
                 );
         }
-        view.on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
-            if this.model.busy.is_none()
-                && let Some(path) = paths.0.first()
-            {
-                this.model.select_image(path.clone());
-                this.refresh_controls(window, cx);
-                cx.notify();
-            }
-        }))
+        div()
+            .size_full()
+            .flex()
+            .justify_center()
+            .child(view)
+            .on_drop(cx.listener(|this, paths: &ExternalPaths, window, cx| {
+                if this.model.busy.is_none()
+                    && let Some(path) = paths.0.first()
+                {
+                    this.model.select_image(path.clone());
+                    this.refresh_controls(window, cx);
+                    cx.notify();
+                }
+            }))
     }
 }
 

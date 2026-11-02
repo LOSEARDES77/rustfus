@@ -147,7 +147,7 @@ const ICONS: &[(&str, &[u8])] = &[
         "icons/usb.svg",
         include_bytes!("../../../res/icons/usb.svg"),
     ),
-    // Kit's platform title bar paths use these Lucide equivalents.
+    // Kit's platform title bar paths resolve to Tabler equivalents.
     (
         "icons/window-close.svg",
         include_bytes!("../../../res/icons/window-close.svg"),
@@ -204,6 +204,7 @@ mod tests {
             assert!(paths.insert(path), "duplicate asset: {path}");
             assert!(path.starts_with("icons/") && path.ends_with(".svg"));
             let svg = std::str::from_utf8(bytes).expect("SVG is UTF-8");
+            assert!(svg.contains("icon-tabler"), "not a Tabler icon: {path}");
             assert!(svg.trim_start().starts_with("<svg"), "{path}");
             assert!(
                 svg.contains("xmlns=\"http://www.w3.org/2000/svg\""),

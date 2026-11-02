@@ -10,15 +10,13 @@ use gpui_kit::component::{
     button::{Button, ButtonVariants},
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
-    progress::Progress,
     radio::Radio,
     select::{SearchableVec, Select, SelectState},
-    text::TextView,
 };
 use gpui_kit::{
-    App, AppContext, ClipboardItem, Context, Entity, FocusHandle, InteractiveElement, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription,
-    WeakEntity, Window, div, prelude::FluentBuilder, px,
+    App, AppContext, Context, Entity, FocusHandle, InteractiveElement, IntoElement, ParentElement,
+    Render, SharedString, StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window,
+    div, prelude::FluentBuilder, px,
 };
 use rustfus_core::loc::{t, tf};
 use rustfus_core::{syslinux, update::Version};
@@ -35,7 +33,6 @@ pub(crate) fn key(dialog: &Dialog) -> String {
         Dialog::Wue => "wue".into(),
         Dialog::Hybrid { .. } => "hybrid".into(),
         Dialog::Confirm => "confirm".into(),
-        Dialog::Hash(..) => "hash".into(),
         Dialog::NewVersion(release) => format!("release:{}:{}", release.version, release.url),
         Dialog::Error(message) => format!("error:{message}"),
     }
@@ -54,7 +51,6 @@ fn title(dialog: &Dialog, model: &Model) -> String {
         Dialog::Wue => t("MSG_327"),
         Dialog::Hybrid { .. } => tf("MSG_274", &["ISOHybrid"]),
         Dialog::Confirm => "Warning".into(),
-        Dialog::Hash(..) => "Checksums".into(),
         Dialog::NewVersion(_) => t("IDD_NEW_VERSION").replace("Rufus", "Rustfus"),
         Dialog::Error(_) => t("MSG_042"),
     }
@@ -422,50 +418,6 @@ impl Render for DialogView {
                     .child(self.cancel(crate::ui::action_label(&t("IDCANCEL")), cx))
                     .child(self.approve(crate::ui::action_label(&t("IDOK")), true, cx));
             }
-            Dialog::Hash(hashes, progress) => {
-                if let Some(hashes) = hashes {
-                    for (index, (name, value)) in ["MD5", "SHA1", "SHA256", "SHA512"]
-                        .into_iter()
-                        .zip(hashes)
-                        .enumerate()
-                    {
-                        let copy = value.clone();
-                        body = body.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap_1()
-                                .min_w_0()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .justify_between()
-                                        .items_center()
-                                        .child(name)
-                                        .child(
-                                            Button::new(("copy-hash", index))
-                                                .label("Copy")
-                                                .on_click(move |_, _, cx| {
-                                                    cx.write_to_clipboard(
-                                                        ClipboardItem::new_string(copy.clone()),
-                                                    )
-                                                }),
-                                        ),
-                                )
-                                .child(
-                                    TextView::markdown(("hash-value", index), value)
-                                        .selectable(true),
-                                ),
-                        );
-                    }
-                    footer = footer.child(self.cancel(crate::ui::action_label(&t("IDOK")), cx));
-                } else {
-                    body = body
-                        .child(Progress::new("hash-progress").value(progress * 100.0))
-                        .child(format!("{:.0}%", progress.clamp(0.0, 1.0) * 100.0));
-                    footer = footer.child(self.cancel(crate::ui::action_label(&t("IDCANCEL")), cx));
-                }
-            }
             Dialog::NewVersion(release) => {
                 body = body.child(t("IDS_NEW_VERSION_AVAIL_TXT")).child(format!(
                     "Rustfus {} → {}",
@@ -513,10 +465,6 @@ mod tests {
 
     #[test]
     fn live_changes_keep_the_same_opening() {
-        assert_eq!(
-            key(&Dialog::Hash(None, 0.0)),
-            key(&Dialog::Hash(Some(Default::default()), 1.0))
-        );
         assert_eq!(
             key(&Dialog::Hybrid { dd: false }),
             key(&Dialog::Hybrid { dd: true })
