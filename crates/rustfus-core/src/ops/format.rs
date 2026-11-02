@@ -5,9 +5,7 @@
 
 use super::files::{Dest, DirDest, copy_files};
 use super::layout::{ext_kind, fat_label, layout, write_tables, zero_range};
-use super::{
-    Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze, e, open_dev, sanitize_label, unmount,
-};
+use super::{Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze, e, open_dev, sanitize_label};
 use crate::blockdev::BlockDev;
 use crate::{bootrec, fsos, iso, part, syslinux};
 use std::fs::File;
@@ -171,8 +169,7 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     );
 
     ctx.progress(0.0, "Unmounting...");
-    unmount(&job.drive)?;
-    let dev = open_dev(&job.drive)?;
+    let dev = ctx.open_unmounted(&job.drive)?;
     if !job.quick {
         zero_range(
             &dev,

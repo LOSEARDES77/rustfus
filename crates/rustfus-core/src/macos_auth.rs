@@ -33,6 +33,35 @@ const MAX_FRAME: usize = 1024 * 1024;
 const WAIT: Duration = Duration::from_millis(100);
 const AUTH_TIMEOUT: Duration = Duration::from_secs(180);
 const CANCELLED: &str = "Cancelled";
+const DISK_PRIVACY_ERROR: &str = "macOS blocked raw disk access";
+pub const PRIVACY_SETTINGS_URL: &str =
+    "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles";
+
+pub fn is_disk_privacy_error(message: &str) -> bool {
+    message.starts_with(DISK_PRIVACY_ERROR)
+}
+
+pub(crate) fn disk_open_error(device: &str, error: &io::Error) -> String {
+    disk_open_error_for_uid(device, error, effective_uid())
+}
+
+fn disk_open_error_for_uid(device: &str, error: &io::Error, uid: u32) -> String {
+    match (uid, error.raw_os_error()) {
+        (0, Some(libc::EPERM)) => format!(
+            "{DISK_PRIVACY_ERROR} to {device}: {error}.\n\n\
+             The disk worker is already running with administrator privileges. macOS privacy or device-security restrictions can still deny access.\n\n\
+             In System Settings → Privacy & Security, check Rustfus's Removable Volumes access under Files & Folders, if listed. If raw disk access remains blocked, allow Rustfus under Full Disk Access, then quit and reopen Rustfus. For cargo/Terminal launches, check the launching Terminal app instead.\n\n\
+             If access is already allowed, close apps using this USB drive and reconnect it. Rustfus will not bypass macOS security or retry the write automatically."
+        ),
+        (0, Some(libc::EACCES)) => format!(
+            "Cannot open {device}: {error}. The disk worker already has administrator privileges; check the device's access restrictions."
+        ),
+        (_, Some(libc::EPERM | libc::EACCES)) => format!(
+            "Cannot open {device}: {error}. Start the write from the Rustfus app to request macOS administrator authorization, or run the command-line write with sudo."
+        ),
+        _ => format!("Cannot open {device}: {error}"),
+    }
+}
 const APPLESCRIPT: &str = r#"on run argv
     set executablePath to item 1 of argv
     set socketPath to item 2 of argv
@@ -469,6 +498,10 @@ fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
         let worker_cancel = cancel.clone();
         let worker = scope.spawn(move || {
             let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let _ = worker_tx.send(Msg::Log(format!(
+                    "macOS disk worker effective UID: {}",
+                    effective_uid()
+                )));
                 if worker_cancel.load(Ordering::Relaxed) {
                     return Err(CANCELLED.into());
                 }
@@ -503,6 +536,23 @@ fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn root_eperm_is_explained_as_privacy_or_device_security() {
+        let error = io::Error::from_raw_os_error(libc::EPERM);
+        let message = disk_open_error_for_uid("/dev/rdisk12", &error, 0);
+        assert!(is_disk_privacy_error(&message));
+        assert!(message.contains("System Settings"));
+        assert!(!message.contains("run as root"));
+    }
+
+    #[test]
+    fn unprivileged_eperm_keeps_the_authorization_guidance() {
+        let error = io::Error::from_raw_os_error(libc::EPERM);
+        let message = disk_open_error_for_uid("/dev/rdisk12", &error, 501);
+        assert!(!is_disk_privacy_error(&message));
+        assert!(message.contains("administrator authorization"));
+    }
 
     #[test]
     fn frames_round_trip_and_reject_unbounded_or_invalid_messages() {

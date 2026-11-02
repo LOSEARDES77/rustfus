@@ -424,15 +424,21 @@ fn open_dev(d: &Drive) -> Result<File, String> {
     #[cfg(target_os = "linux")]
     std::os::unix::fs::OpenOptionsExt::custom_flags(&mut opts, libc::O_EXCL);
     opts.open(&dev).map_err(|err| {
-        #[cfg(target_os = "linux")]
-        if err.raw_os_error() == Some(libc::EBUSY) {
-            return format!("{dev} is in use (mounted, swap, LVM or RAID); release it and retry");
-        }
         #[cfg(target_os = "macos")]
-        let hint = "macOS authorization is required for raw disk access";
+        {
+            crate::macos_auth::disk_open_error(&dev, &err)
+        }
         #[cfg(not(target_os = "macos"))]
-        let hint = "run as root/Administrator";
-        format!("Cannot open {dev}: {err} ({hint})")
+        {
+            #[cfg(target_os = "linux")]
+            if err.raw_os_error() == Some(libc::EBUSY) {
+                return format!(
+                    "{dev} is in use (mounted, swap, LVM or RAID); release it and retry"
+                );
+            }
+            let hint = "run as root/Administrator";
+            format!("Cannot open {dev}: {err} ({hint})")
+        }
     })
 }
 
@@ -469,6 +475,19 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    fn open_unmounted(&self, drive: &Drive) -> Result<File, String> {
+        self.check()?;
+        self.log(format!("Verifying and unmounting {}", drive.path));
+        unmount(drive)?;
+        self.log(format!(
+            "Unmount complete; opening {} for disk access",
+            raw_path(drive)
+        ));
+        self.check()?;
+        let device = open_dev(drive)?;
+        self.log("Raw disk access granted");
+        Ok(device)
+    }
     fn progress(&self, p: f32, s: impl Into<String>) {
         self.tx.send(Msg::Progress(p, s.into())).ok();
     }

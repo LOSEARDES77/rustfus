@@ -454,7 +454,19 @@ impl Render for DialogView {
                     );
             }
             Dialog::Error(message) => {
+                #[cfg(target_os = "macos")]
+                let privacy_error = rustfus_core::macos_auth::is_disk_privacy_error(&message);
                 body = body.child(message);
+                #[cfg(target_os = "macos")]
+                if privacy_error {
+                    footer = footer.child(
+                        Button::new("open-macos-privacy")
+                            .label("Open Privacy Settings")
+                            .on_click(|_, _, cx| {
+                                cx.open_url(rustfus_core::macos_auth::PRIVACY_SETTINGS_URL);
+                            }),
+                    );
+                }
                 footer = footer.child(self.cancel(crate::ui::action_label(&t("IDOK")), cx));
             }
         }

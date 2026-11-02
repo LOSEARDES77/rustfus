@@ -778,6 +778,25 @@ mod tests {
     }
 
     #[test]
+    fn windows_setup_bypasses_are_only_enabled_for_windows_11_iso_jobs() {
+        let (mut model, _scan) = fixture();
+        model.image = Some("windows11.iso".into());
+        model.report.is_iso = true;
+        model.report.windows = true;
+        model.report.windows_11 = false;
+        model.wue.bypass_hw_checks = true;
+        model.wue.no_online_account = true;
+        assert!(!model.windows_options().bypass_hw_checks);
+        assert!(!model.windows_options().no_online_account);
+        model.report.windows_11 = true;
+        assert!(model.windows_options().bypass_hw_checks);
+        assert!(model.windows_options().no_online_account);
+        model.dd = true;
+        assert!(!model.windows_options().bypass_hw_checks);
+        assert!(!model.windows_options().no_online_account);
+    }
+
+    #[test]
     fn log_timestamps_preserve_every_row() {
         let mut log = Log::default();
         log.push("ERROR: <disk> & café\n\nsecond\r\n".into());
