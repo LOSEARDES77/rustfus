@@ -636,6 +636,12 @@ impl eframe::App for App {
             self.select_image(p);
         }
 
+        let mut root = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(ctx.content_rect())
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        let ui = &mut root;
         let surface = ctx.shadcn_theme().background;
         egui::Panel::bottom("statusbar")
             .frame(
@@ -679,17 +685,28 @@ impl eframe::App for App {
                     .inner_margin(egui::Margin::symmetric(12, 10)),
             )
             .show(ui, |ui| self.footer(ui));
-        egui::CentralPanel::default_margins().show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.add_enabled_ui(self.busy.is_none(), |ui| {
-                        self.drive_section(ui);
-                        self.format_section(ui);
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::NONE
+                    .fill(surface)
+                    .inner_margin(egui::Margin::symmetric(12, 12)),
+            )
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("main-form-scroll")
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        let width = ui.available_width();
+                        ui.set_width(width);
+                        ui.add_space(4.0);
+                        ui.add_enabled_ui(self.busy.is_none(), |ui| {
+                            self.drive_section(ui);
+                            self.format_section(ui);
+                        });
+                        self.status_section(ui);
+                        ui.add_space(4.0);
                     });
-                    self.status_section(ui);
-                });
-        });
+            });
         self.dialogs(&ctx);
     }
 }
@@ -723,6 +740,7 @@ pub fn run() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::widgets::action_label;
     use egui_kittest::{
         Harness,
         kittest::{By, NodeT, Queryable},
@@ -747,72 +765,86 @@ mod tests {
     }
 
     fn form_harness_at(app: App, size: egui::Vec2) -> Harness<'static, App> {
-        Harness::builder().with_size(size).build_ui_state(
-            |ui, app| {
-                ui.ctx().set_theme(app.theme_preference);
-                sync_style(ui.ctx());
-                app.poll();
-                let ctx = ui.ctx().clone();
-                let viewport = ctx.content_rect();
-                // The kittest UI wrapper has an 8-point margin; the native root does not.
-                let mut root = ui.new_child(egui::UiBuilder::new().max_rect(viewport));
-                let surface = ctx.shadcn_theme().background;
-                let status = egui::Panel::bottom("statusbar")
-                    .frame(
-                        egui::Frame::NONE
-                            .fill(surface)
-                            .inner_margin(egui::Margin::symmetric(12, 4)),
-                    )
-                    .show(&mut root, |ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(&app.status);
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    ui.monospace("00:00:00");
-                                    ui.add(functora_egui::Separator::vertical());
-                                },
-                            );
-                        });
-                    });
-                let actions = egui::Panel::bottom("actions")
-                    .frame(
-                        egui::Frame::NONE
-                            .fill(surface)
-                            .inner_margin(egui::Margin::symmetric(12, 10)),
-                    )
-                    .show(&mut root, |ui| app.footer(ui));
-                let central = egui::CentralPanel::default_margins().show(&mut root, |ui| {
-                    let form = egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.add_enabled_ui(app.busy.is_none(), |ui| {
-                                app.drive_section(ui);
-                                app.format_section(ui);
+        Harness::builder()
+            .with_size(size)
+            .with_step_dt(0.2)
+            .with_max_steps(8)
+            .build_ui_state(
+                |ui, app| {
+                    ui.ctx().set_theme(app.theme_preference);
+                    sync_style(ui.ctx());
+                    app.poll();
+                    let ctx = ui.ctx().clone();
+                    let viewport = ctx.content_rect();
+                    // The kittest UI wrapper has an 8-point margin; the native root does not.
+                    let mut root = ui.new_child(egui::UiBuilder::new().max_rect(viewport));
+                    let surface = ctx.shadcn_theme().background;
+                    let status = egui::Panel::bottom("statusbar")
+                        .frame(
+                            egui::Frame::NONE
+                                .fill(surface)
+                                .inner_margin(egui::Margin::symmetric(12, 4)),
+                        )
+                        .show(&mut root, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(&app.status);
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        ui.monospace("00:00:00");
+                                        ui.add(functora_egui::Separator::vertical());
+                                    },
+                                );
                             });
-                            app.status_section(ui);
+                        });
+                    let actions = egui::Panel::bottom("actions")
+                        .frame(
+                            egui::Frame::NONE
+                                .fill(surface)
+                                .inner_margin(egui::Margin::symmetric(12, 10)),
+                        )
+                        .show(&mut root, |ui| app.footer(ui));
+                    let central = egui::CentralPanel::default()
+                        .frame(
+                            egui::Frame::NONE
+                                .fill(surface)
+                                .inner_margin(egui::Margin::symmetric(12, 12)),
+                        )
+                        .show(&mut root, |ui| {
+                            let form = egui::ScrollArea::vertical()
+                                .id_salt("main-form-scroll")
+                                .auto_shrink([false, false])
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.add_space(4.0);
+                                    ui.add_enabled_ui(app.busy.is_none(), |ui| {
+                                        app.drive_section(ui);
+                                        app.format_section(ui);
+                                    });
+                                    app.status_section(ui);
+                                    ui.add_space(4.0);
+                                });
+                            ctx.data_mut(|data| {
+                                data.insert_temp(
+                                    egui::Id::new("test-form-layout"),
+                                    (form.inner_rect, form.content_size),
+                                );
+                            });
                         });
                     ctx.data_mut(|data| {
                         data.insert_temp(
-                            egui::Id::new("test-form-layout"),
-                            (form.inner_rect, form.content_size),
+                            egui::Id::new("test-panel-rects"),
+                            [
+                                status.response.rect,
+                                actions.response.rect,
+                                central.response.rect,
+                            ],
                         );
                     });
-                });
-                ctx.data_mut(|data| {
-                    data.insert_temp(
-                        egui::Id::new("test-panel-rects"),
-                        [
-                            status.response.rect,
-                            actions.response.rect,
-                            central.response.rect,
-                        ],
-                    );
-                });
-                app.dialogs(&ctx);
-            },
-            app,
-        )
+                    app.dialogs(&ctx);
+                },
+                app,
+            )
     }
 
     fn assert_form_fits(harness: &Harness<'static, App>) {
@@ -912,6 +944,152 @@ mod tests {
         assert!(harness.query_by_label(&language.name).is_none());
         assert_eq!(loc::current(), original);
         assert!(harness.state().busy.is_none());
+    }
+
+    #[test]
+    fn utility_menus_are_bounded_and_escape_does_not_start_work() {
+        let original_language = loc::current();
+        let languages = loc::languages();
+        for width in [470.0, 520.0] {
+            for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+                for language_menu in [false, true] {
+                    let (mut app, _scan_tx) = form_app();
+                    app.theme_preference = preference;
+                    let mut harness = form_harness_at(app, egui::vec2(width, 440.0));
+                    harness.run_steps(3);
+                    let (trigger, requested, choices) = if language_menu {
+                        (
+                            t("MSG_273"),
+                            280.0,
+                            languages
+                                .iter()
+                                .take(3)
+                                .map(|l| l.name.clone())
+                                .collect::<Vec<_>>(),
+                        )
+                    } else {
+                        (
+                            "Theme".into(),
+                            160.0,
+                            vec!["System".into(), "Light".into(), "Dark".into()],
+                        )
+                    };
+                    for choice in &choices {
+                        assert!(harness.query_by_label(choice).is_none());
+                    }
+                    let node = harness.get_by_label(&trigger);
+                    let accesskit_id = u128::from(node.accesskit_node().id());
+                    let id =
+                        unsafe { egui::Id::from_high_entropy_bits((accesskit_id >> 64) as u64) };
+                    node.click();
+                    harness.run_steps(3);
+                    let bounds = harness
+                        .ctx
+                        .data(|d| d.get_temp::<egui::Rect>(id.with("menu-bounds")))
+                        .unwrap();
+                    assert!(bounds.width() <= requested + 14.0, "{trigger}: {bounds:?}");
+                    assert!(
+                        harness.ctx.content_rect().contains_rect(bounds),
+                        "{trigger}: {bounds:?}"
+                    );
+                    if language_menu {
+                        assert!(bounds.height() <= 294.0, "{bounds:?}");
+                    }
+                    for choice in &choices {
+                        let row = harness.get_by_label(choice).rect();
+                        assert!((row.height() - 28.0).abs() <= 0.5, "{choice}: {row:?}");
+                        assert!(bounds.contains_rect(row));
+                    }
+                    harness.key_press(egui::Key::Escape);
+                    harness.run_steps(3);
+                    for choice in &choices {
+                        assert!(harness.query_by_label(choice).is_none());
+                    }
+                    assert_eq!(harness.state().theme_preference, preference);
+                    assert_eq!(loc::current(), original_language);
+                    assert!(harness.state().busy.is_none());
+                    assert!(harness.state().update_rx.is_none());
+                    assert!(harness.state().hash_rx.is_none());
+                }
+            }
+        }
+    }
+
+    fn rendered_label_count(shape: &egui::epaint::Shape, label: &str) -> usize {
+        match shape {
+            egui::epaint::Shape::Text(text) => usize::from(text.galley.text() == label),
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().map(|s| rendered_label_count(s, label)).sum()
+            }
+            _ => 0,
+        }
+    }
+
+    #[test]
+    fn footer_icon_tooltips_render_each_label_once_after_hover() {
+        for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+            for key in ["MSG_273", "MSG_302", "MSG_303"] {
+                let (mut app, _scan_tx) = form_app();
+                app.theme_preference = preference;
+                let mut harness = form_harness_at(app, egui::vec2(470.0, 440.0));
+                harness.run_steps(3);
+                let label = action_label(&t(key));
+                assert_eq!(
+                    harness
+                        .output()
+                        .shapes
+                        .iter()
+                        .map(|s| rendered_label_count(&s.shape, &label))
+                        .sum::<usize>(),
+                    0
+                );
+                harness.get_by_label(&label).hover();
+                harness.run_steps(10);
+                assert_eq!(
+                    harness
+                        .output()
+                        .shapes
+                        .iter()
+                        .map(|s| rendered_label_count(&s.shape, &label))
+                        .sum::<usize>(),
+                    1,
+                    "{label}"
+                );
+                assert!(harness.state().busy.is_none());
+                assert!(harness.state().update_rx.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn boot_image_controls_fit_the_padded_form_without_opening_files() {
+        for width in [470.0, 520.0] {
+            for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+                let (mut app, _scan_tx) = form_app();
+                app.boot = BootSel::Image;
+                app.theme_preference = preference;
+                let mut harness = form_harness_at(app, egui::vec2(width, 440.0));
+                harness.run_steps(3);
+                assert_form_fits(&harness);
+                let padded = harness.ctx.content_rect().shrink2(egui::vec2(12.0, 12.0));
+                for label in [
+                    t("IDS_BOOT_SELECTION_TXT"),
+                    t("MSG_314"),
+                    action_text("IDC_SELECT"),
+                    "Image source".into(),
+                ] {
+                    let rect = harness.get_by_label(&label).rect();
+                    assert!(
+                        padded.contains_rect(rect),
+                        "{label}: {rect:?} outside {padded:?}"
+                    );
+                }
+                assert!(harness.state().image.is_none());
+                assert!(harness.state().hash_rx.is_none());
+                assert!(harness.state().busy.is_none());
+                assert!(harness.state().update_rx.is_none());
+            }
+        }
     }
 
     #[test]

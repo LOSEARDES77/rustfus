@@ -6,12 +6,10 @@
 use super::{App, BootSel, Dialog, FidoState, MB};
 use crate::widgets::{
     action_label, bad_block_mode, button, checkbox, cluster_name, combo, icon_button, input,
-    progress, section, select, spinner, toggle,
+    menu_item, popover, progress, section, select, spinner, toggle,
 };
 use eframe::egui;
-use functora_egui::{
-    Button, ButtonGroup, ButtonVariant, ComponentSize, DropdownMenu, Popover, Slider,
-};
+use functora_egui::{ButtonGroup, ButtonVariant, DropdownMenu, Slider};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Fs, Scheme, Target};
 use rustfus_core::{image, loc, ops};
@@ -49,153 +47,162 @@ impl App {
                 self.retry_scan();
             }
         }
-        ui.horizontal(|ui| {
-            let choices: Vec<String> = self.drives.iter().map(|d| d.label()).collect();
-            let mut selected = self.selected.unwrap_or(usize::MAX);
-            let width = (ui.available_width() - 36.0 - ui.spacing().item_spacing.x).max(1.0);
-            let response = ui
-                .allocate_ui(egui::vec2(width, 32.0), |ui| {
-                    ui.set_width(width);
-                    ui.add_enabled_ui(self.scan_ready(), |ui| {
-                        select(ui, "device", &mut selected, &choices, "Select a device")
-                            .labelled_by(device_label.id)
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 36.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let choices: Vec<String> = self.drives.iter().map(|d| d.label()).collect();
+                let mut selected = self.selected.unwrap_or(usize::MAX);
+                let width = (ui.available_width() - 32.0 - ui.spacing().item_spacing.x).max(1.0);
+                let response = ui
+                    .allocate_ui(egui::vec2(width, 32.0), |ui| {
+                        ui.set_width(width);
+                        ui.add_enabled_ui(self.scan_ready(), |ui| {
+                            select(ui, "device", &mut selected, &choices, "Select a device")
+                                .labelled_by(device_label.id)
+                        })
+                        .inner
                     })
-                    .inner
-                })
-                .inner;
-            if let Some(drive) = self.drive() {
-                response.clone().on_hover_text(&drive.path);
-            }
-            if response.changed() {
-                self.selected = (selected < self.drives.len()).then_some(selected);
-            }
-            let save = ui.add_enabled(
-                self.scan_ready() && self.drive().is_some(),
-                icon_button(t("MSG_304"), "save"),
-            );
-            if save.on_hover_text(t("MSG_304")).clicked()
-                && let Some(out) = rfd::FileDialog::new()
-                    .add_filter(t("MSG_343"), &["vhd"])
-                    .add_filter(t("MSG_095"), &["img"])
-                    .set_file_name("drive.vhd")
-                    .save_file()
-                && let Some(d) = self.drive().cloned()
-            {
-                self.log
-                    .push(format!("Saving {} to {}", d.path, out.display()));
-                let ctx = ui.ctx().clone();
-                self.spawn(&ctx, move |tx, c| ops::save_drive(&d, &out, tx, c));
-            }
-        });
+                    .inner;
+                if let Some(drive) = self.drive() {
+                    response.clone().on_hover_text(&drive.path);
+                }
+                if response.changed() {
+                    self.selected = (selected < self.drives.len()).then_some(selected);
+                }
+                let save = ui.add_enabled(
+                    self.scan_ready() && self.drive().is_some(),
+                    icon_button(t("MSG_304"), "save"),
+                );
+                if save.clicked()
+                    && let Some(out) = rfd::FileDialog::new()
+                        .add_filter(t("MSG_343"), &["vhd"])
+                        .add_filter(t("MSG_095"), &["img"])
+                        .set_file_name("drive.vhd")
+                        .save_file()
+                    && let Some(d) = self.drive().cloned()
+                {
+                    self.log
+                        .push(format!("Saving {} to {}", d.path, out.display()));
+                    let ctx = ui.ctx().clone();
+                    self.spawn(&ctx, move |tx, c| ops::save_drive(&d, &out, tx, c));
+                }
+            },
+        );
 
         let boot_label = ui.label(t("IDS_BOOT_SELECTION_TXT"));
-        ui.horizontal(|ui| {
-            let name = match &self.image {
-                Some(p) => p
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .into_owned(),
-                None => tf("MSG_281", &[&t("MSG_280")]),
-            };
-            let before = self.boot;
-            let w =
-                (ui.available_width() - 28.0 - 118.0 - ui.spacing().item_spacing.x * 2.0).max(1.0);
-            ui.allocate_ui(egui::vec2(w, ui.spacing().interact_size.y), |ui| {
-                ui.set_max_width(w);
-                let choices = vec![name, "FreeDOS".into(), t("MSG_279")];
-                let mut selected = match self.boot {
-                    BootSel::Image => 0,
-                    BootSel::FreeDos => 1,
-                    BootSel::NonBootable => 2,
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 36.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let name = match &self.image {
+                    Some(p) => p
+                        .file_name()
+                        .unwrap_or_default()
+                        .to_string_lossy()
+                        .into_owned(),
+                    None => tf("MSG_281", &[&t("MSG_280")]),
                 };
-                if select(ui, "boot", &mut selected, &choices, &t("MSG_280"))
-                    .labelled_by(boot_label.id)
-                    .changed()
-                {
-                    self.boot = match selected {
-                        1 => BootSel::FreeDos,
-                        2 => BootSel::NonBootable,
-                        _ => BootSel::Image,
+                let before = self.boot;
+                let w = (ui.available_width() - 32.0 - 122.0 - ui.spacing().item_spacing.x * 2.0)
+                    .max(1.0);
+                ui.allocate_ui(egui::vec2(w, 36.0), |ui| {
+                    ui.set_width(w);
+                    let choices = vec![name, "FreeDOS".into(), t("MSG_279")];
+                    let mut selected = match self.boot {
+                        BootSel::Image => 0,
+                        BootSel::FreeDos => 1,
+                        BootSel::NonBootable => 2,
                     };
-                }
-            });
-            if before != self.boot {
-                match self.boot {
-                    BootSel::FreeDos => {
-                        (self.fs, self.scheme, self.target) = (Fs::Fat32, Scheme::Mbr, Target::Bios)
-                    }
-                    BootSel::NonBootable => {
-                        (self.scheme, self.target) = (Scheme::Mbr, Target::BiosUefi)
-                    }
-                    BootSel::Image => {}
-                }
-                self.dd = self.image_mode() && !self.report.is_iso;
-                if !self.image_mode() {
-                    self.label = self.drive().map(|d| d.name.clone()).unwrap_or_default();
-                }
-            }
-            let hash = ui.add_enabled(self.image_mode(), icon_button(t("MSG_314"), "hash"));
-            if hash.on_hover_text(t("MSG_314")).clicked() {
-                self.compute_hashes(ui.ctx());
-            }
-            ui.add_enabled_ui(self.boot == BootSel::Image, |ui| {
-                let select_text = t("IDC_SELECT");
-                let download = t("MSG_040");
-                let text = if self.download_mode {
-                    &download
-                } else {
-                    &select_text
-                };
-                let mut main_clicked = false;
-                ui.allocate_ui(egui::vec2(118.0, ui.spacing().interact_size.y), |ui| {
-                    ui.set_width(118.0);
-                    ButtonGroup::show(ui, |ui| {
-                        main_clicked = ui.add(button(text).fixed_width(90.0)).clicked();
-                        let menu = ui.add(
-                            icon_button("Image source", "chevron-down")
-                                .fixed_width(28.0)
-                                .variant(ButtonVariant::Outline)
-                                .has_popup(true),
-                        );
-                        DropdownMenu::show_value(
-                            ui,
-                            &menu,
-                            &[
-                                (false, action_label(&select_text)),
-                                (true, action_label(&download)),
-                            ],
-                            |mode| self.download_mode = mode,
-                        );
-                    });
-                });
-                if main_clicked {
-                    if self.download_mode {
-                        let mut st = FidoState {
-                            chosen: Vec::new(),
-                            options: Vec::new(),
-                            pick: 0,
-                            rx: None,
-                            error: None,
-                        };
-                        st.query(ui.ctx());
-                        self.dialog = Dialog::Fido(st);
-                    } else if let Some(p) = rfd::FileDialog::new()
-                        .add_filter(
-                            "Disk images", // no Rufus string
-                            &[
-                                "iso", "img", "bin", "raw", "dd", "vhd", "vhdx", "ffu", "gz",
-                                "bz2", "xz", "lzma", "zst", "zip",
-                            ],
-                        )
-                        .add_filter(t("MSG_107"), &["*"])
-                        .pick_file()
+                    if select(ui, "boot", &mut selected, &choices, &t("MSG_280"))
+                        .labelled_by(boot_label.id)
+                        .changed()
                     {
-                        self.select_image(p);
+                        self.boot = match selected {
+                            1 => BootSel::FreeDos,
+                            2 => BootSel::NonBootable,
+                            _ => BootSel::Image,
+                        };
+                    }
+                });
+                if before != self.boot {
+                    match self.boot {
+                        BootSel::FreeDos => {
+                            (self.fs, self.scheme, self.target) =
+                                (Fs::Fat32, Scheme::Mbr, Target::Bios)
+                        }
+                        BootSel::NonBootable => {
+                            (self.scheme, self.target) = (Scheme::Mbr, Target::BiosUefi)
+                        }
+                        BootSel::Image => {}
+                    }
+                    self.dd = self.image_mode() && !self.report.is_iso;
+                    if !self.image_mode() {
+                        self.label = self.drive().map(|d| d.name.clone()).unwrap_or_default();
                     }
                 }
-            });
-        });
+                let hash = ui.add_enabled(self.image_mode(), icon_button(t("MSG_314"), "hash"));
+                if hash.clicked() {
+                    self.compute_hashes(ui.ctx());
+                }
+                ui.add_enabled_ui(self.boot == BootSel::Image, |ui| {
+                    let select_text = t("IDC_SELECT");
+                    let download = t("MSG_040");
+                    let text = if self.download_mode {
+                        &download
+                    } else {
+                        &select_text
+                    };
+                    let mut main_clicked = false;
+                    ui.allocate_ui(egui::vec2(122.0, 36.0), |ui| {
+                        ui.set_width(122.0);
+                        ButtonGroup::show(ui, |ui| {
+                            main_clicked = ui.add(button(text).fixed_width(90.0)).clicked();
+                            let menu = ui.add(
+                                icon_button("Image source", "chevron-down")
+                                    .fixed_width(32.0)
+                                    .variant(ButtonVariant::Outline)
+                                    .has_popup(true),
+                            );
+                            DropdownMenu::show_value(
+                                ui,
+                                &menu,
+                                &[
+                                    (false, action_label(&select_text)),
+                                    (true, action_label(&download)),
+                                ],
+                                |mode| self.download_mode = mode,
+                            );
+                        });
+                    });
+                    if main_clicked {
+                        if self.download_mode {
+                            let mut st = FidoState {
+                                chosen: Vec::new(),
+                                options: Vec::new(),
+                                pick: 0,
+                                rx: None,
+                                error: None,
+                            };
+                            st.query(ui.ctx());
+                            self.dialog = Dialog::Fido(st);
+                        } else if let Some(p) = rfd::FileDialog::new()
+                            .add_filter(
+                                "Disk images", // no Rufus string
+                                &[
+                                    "iso", "img", "bin", "raw", "dd", "vhd", "vhdx", "ffu", "gz",
+                                    "bz2", "xz", "lzma", "zst", "zip",
+                                ],
+                            )
+                            .add_filter(t("MSG_107"), &["*"])
+                            .pick_file()
+                        {
+                            self.select_image(p);
+                        }
+                    }
+                });
+            },
+        );
 
         if self.iso_mode() && self.report.windows {
             let image_label = ui.label(t("IDS_IMAGE_OPTION_TXT"));
@@ -397,128 +404,109 @@ impl App {
     }
 
     pub(super) fn footer(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            let lang = ui
-                .add(icon_button(t("MSG_273"), "languages").has_popup(true))
-                .on_hover_text(t("MSG_273"));
-            Popover::new().show(ui, &lang, |ui| {
-                egui::ScrollArea::vertical()
-                    .max_height(280.0)
-                    .show(ui, |ui| {
-                        for language in loc::languages() {
-                            // Language names are data, not action labels: preserve their casing.
-                            let response = ui.add(
-                                Button::new(&language.name)
-                                    .variant(ButtonVariant::Ghost)
-                                    .size(ComponentSize::Xs)
-                                    .selected(language.code == loc::current())
-                                    .full_width(),
-                            );
-                            response.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    response.enabled(),
-                                    &language.name,
-                                )
-                            });
-                            if response.clicked() {
-                                loc::set_language(&language.code);
-                                egui::Popup::close_all(ui.ctx());
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), 36.0),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                let lang = ui.add(icon_button(t("MSG_273"), "languages").has_popup(true));
+                popover(ui, &lang, 280.0, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height(280.0)
+                        .show(ui, |ui| {
+                            for language in loc::languages() {
+                                // Language names are data, not action labels: preserve their casing.
+                                let response =
+                                    menu_item(ui, &language.name, language.code == loc::current());
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::labeled(
+                                        egui::WidgetType::Button,
+                                        response.enabled(),
+                                        &language.name,
+                                    )
+                                });
+                                if response.clicked() {
+                                    loc::set_language(&language.code);
+                                    egui::Popup::close_all(ui.ctx());
+                                }
                             }
+                        });
+                });
+                if ui.add(icon_button(t("MSG_302"), "info")).clicked() {
+                    self.show_about = true;
+                }
+                let theme = ui.add(icon_button("Theme", "theme").has_popup(true));
+                popover(ui, &theme, 160.0, |ui| {
+                    let current = match self.theme_preference {
+                        egui::ThemePreference::System => "System",
+                        egui::ThemePreference::Light => "Light",
+                        egui::ThemePreference::Dark => "Dark",
+                    };
+                    ui.label(format!("Theme: {current}"));
+                    for (preference, label) in [
+                        (egui::ThemePreference::System, "System"),
+                        (egui::ThemePreference::Light, "Light"),
+                        (egui::ThemePreference::Dark, "Dark"),
+                    ] {
+                        if menu_item(ui, label, self.theme_preference == preference).clicked() {
+                            self.theme_preference = preference;
+                            ui.ctx().set_theme(preference);
+                            egui::Popup::close_all(ui.ctx());
                         }
-                    });
-            });
-            if ui
-                .add(icon_button(t("MSG_302"), "info"))
-                .on_hover_text(t("MSG_302"))
-                .clicked()
-            {
-                self.show_about = true;
-            }
-            let theme = ui.add(icon_button("Theme", "theme").has_popup(true));
-            Popover::new().show(ui, &theme, |ui| {
-                let current = match self.theme_preference {
-                    egui::ThemePreference::System => "System",
-                    egui::ThemePreference::Light => "Light",
-                    egui::ThemePreference::Dark => "Dark",
-                };
-                ui.label(format!("Theme: {current}"));
-                for (preference, label) in [
-                    (egui::ThemePreference::System, "System"),
-                    (egui::ThemePreference::Light, "Light"),
-                    (egui::ThemePreference::Dark, "Dark"),
-                ] {
+                    }
+                });
+                let updates = ui.add(icon_button("Check for updates", "updates").has_popup(true));
+                let checking = self.update_rx.is_some();
+                let mut check_updates = updates.clicked() && !checking;
+                popover(ui, &updates, 260.0, |ui| {
+                    if checking {
+                        ui.horizontal(|ui| {
+                            spinner(ui);
+                            ui.label("Checking for updates…");
+                        });
+                    } else if !self.update_note.is_empty() {
+                        ui.add(egui::Label::new(&self.update_note).wrap());
+                    }
+                    check_updates |= ui
+                        .add_enabled(!checking, button("Check for updates"))
+                        .clicked();
+                });
+                if check_updates {
+                    self.check_updates(ui.ctx(), true);
+                }
+                if ui.add(icon_button(t("MSG_303"), "logs")).clicked() {
+                    self.show_log = !self.show_log;
+                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if ui
-                        .add(
-                            button(label)
-                                .variant(ButtonVariant::Ghost)
-                                .fixed_width(120.0),
-                        )
+                        .add_enabled(self.busy.is_none(), button(t("IDCANCEL")).fixed_width(80.0))
                         .clicked()
                     {
-                        self.theme_preference = preference;
-                        ui.ctx().set_theme(preference);
-                        egui::Popup::close_all(ui.ctx());
+                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                     }
-                }
-            });
-            let updates = ui.add(icon_button("Check for updates", "updates").has_popup(true));
-            let checking = self.update_rx.is_some();
-            let mut check_updates = updates.clicked() && !checking;
-            Popover::new().show(ui, &updates, |ui| {
-                ui.set_width(240.0);
-                if checking {
-                    ui.horizontal(|ui| {
-                        spinner(ui);
-                        ui.label("Checking for updates…");
-                    });
-                } else if !self.update_note.is_empty() {
-                    ui.label(&self.update_note);
-                }
-                check_updates |= ui
-                    .add_enabled(!checking, button("Check for updates"))
-                    .clicked();
-            });
-            if check_updates {
-                self.check_updates(ui.ctx(), true);
-            }
-            if ui
-                .add(icon_button(t("MSG_303"), "logs"))
-                .on_hover_text(t("MSG_303"))
-                .clicked()
-            {
-                self.show_log = !self.show_log;
-            }
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui
-                    .add_enabled(self.busy.is_none(), button(t("IDCANCEL")).fixed_width(80.0))
-                    .clicked()
-                {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                }
-                if let Some((_, cancel)) = &self.busy {
-                    if ui.add(button(t("MSG_007")).fixed_width(80.0)).clicked() {
-                        cancel.store(true, Ordering::Relaxed);
+                    if let Some((_, cancel)) = &self.busy {
+                        if ui.add(button(t("MSG_007")).fixed_width(80.0)).clicked() {
+                            cancel.store(true, Ordering::Relaxed);
+                        }
+                    } else {
+                        let ready = self.scan_ready()
+                            && self.drive().is_some()
+                            && (self.boot != BootSel::Image || self.image.is_some());
+                        if ui
+                            .add_enabled(
+                                ready,
+                                button(t("IDC_START"))
+                                    .variant(ButtonVariant::Default)
+                                    .fixed_width(80.0),
+                            )
+                            .on_hover_text(t("MSG_171"))
+                            .clicked()
+                        {
+                            self.on_start();
+                        }
                     }
-                } else {
-                    let ready = self.scan_ready()
-                        && self.drive().is_some()
-                        && (self.boot != BootSel::Image || self.image.is_some());
-                    if ui
-                        .add_enabled(
-                            ready,
-                            button(t("IDC_START"))
-                                .variant(ButtonVariant::Default)
-                                .fixed_width(80.0),
-                        )
-                        .on_hover_text(t("MSG_171"))
-                        .clicked()
-                    {
-                        self.on_start();
-                    }
-                }
-            });
-        });
+                });
+            },
+        );
     }
 }
 

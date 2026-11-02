@@ -134,15 +134,25 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
                 &mut s.visuals.widgets.inactive,
                 &mut s.visuals.widgets.hovered,
                 &mut s.visuals.widgets.active,
+                &mut s.visuals.widgets.open,
             ] {
                 w.bg_fill = theme.background;
                 w.weak_bg_fill = theme.background;
                 w.bg_stroke = egui::Stroke::new(1.0, theme.input);
                 w.corner_radius = egui::CornerRadius::same(4);
+                w.fg_stroke.color = theme.foreground;
             }
             s.visuals.widgets.hovered.bg_fill = theme.accent;
             s.visuals.widgets.hovered.weak_bg_fill = theme.accent;
             s.visuals.widgets.active.bg_stroke.color = theme.ring;
+            s.visuals.widgets.active.bg_stroke.width = 2.0;
+            s.visuals.widgets.open.bg_stroke = egui::Stroke::new(2.0, theme.ring);
+            s.visuals.selection.bg_fill = if dark {
+                Color32::from_rgb(49, 75, 108)
+            } else {
+                Color32::from_rgb(202, 225, 250)
+            };
+            s.visuals.selection.stroke = egui::Stroke::new(1.0, theme.foreground);
             s.visuals.text_cursor.stroke.color = theme.foreground;
             s.visuals.extreme_bg_color = theme.background;
         });
@@ -251,7 +261,8 @@ impl egui::Widget for IconButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let mut button = FunctoraButton::icon_only(self.icon)
             .variant(self.variant)
-            .size(ComponentSize::Xs);
+            .size(ComponentSize::Xs)
+            .fixed_width(self.width.unwrap_or(32.0));
         if let Some(width) = self.width {
             button = button.fixed_width(width);
         }
@@ -305,12 +316,14 @@ pub(crate) fn checkbox(
 
 /// Compact desktop field; functora's Input has no size override below 800pt.
 pub(crate) fn input(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
-    let padding = egui::vec2(8.0, 5.0);
-    let width = (ui.available_width() - padding.x * 2.0).max(1.0);
+    let padding = egui::vec2(8.0, 6.0);
+    let width = ui.available_width().max(1.0);
+    let theme = ui.ctx().shadcn_theme();
     ui.add(
         egui::TextEdit::singleline(value)
             .font(egui::FontId::proportional(14.0))
             .margin(padding)
+            .text_color(theme.foreground)
             .desired_width(width),
     )
 }
@@ -388,7 +401,11 @@ pub(crate) fn progress(ui: &mut egui::Ui, value: f32, text: impl AsRef<str>) -> 
     let label = ui.label(RichText::new(text.as_ref()).strong());
     let theme = ui.ctx().shadcn_theme();
     let mut progress_theme = theme.clone();
-    progress_theme.primary = RUFUS_GREEN;
+    progress_theme.primary = if value > 0.0 {
+        RUFUS_GREEN
+    } else {
+        theme.muted_foreground
+    };
     // Progress 0.2 has no fill builder; scope only its token lookup, not egui styles.
     let key = egui::Id::NULL;
     ui.ctx().data_mut(|d| d.insert_temp(key, progress_theme));
@@ -634,6 +651,64 @@ pub(crate) fn os_window(
     });
 }
 
+/// Functora's popover expands below 800pt; desktop utility menus stay content-sized.
+pub(crate) fn popover(
+    ui: &mut egui::Ui,
+    trigger: &egui::Response,
+    width: f32,
+    content: impl FnOnce(&mut egui::Ui),
+) {
+    let theme = ui.ctx().shadcn_theme();
+    let max_width = (ui.ctx().content_rect().width() - 28.0).max(1.0);
+    let width = width.min(max_width);
+    let frame = egui::Frame::NONE
+        .fill(theme.popover)
+        .stroke(egui::Stroke::new(1.0, theme.border))
+        .corner_radius(6)
+        .inner_margin(6)
+        .shadow(egui::Shadow {
+            offset: [0, 3],
+            blur: 10,
+            spread: 0,
+            color: Color32::from_black_alpha(24),
+        });
+    if let Some(response) = egui::Popup::from_response(trigger)
+        .id(trigger.id.with("popover"))
+        .open_memory(trigger.clicked().then_some(egui::SetOpenCommand::Toggle))
+        .frame(frame)
+        .gap(4.0)
+        .width(width)
+        .show(|ui| {
+            ui.set_width(width);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            content(ui);
+        })
+    {
+        ui.ctx()
+            .data_mut(|d| d.insert_temp(trigger.id.with("menu-bounds"), response.response.rect));
+    }
+}
+
+pub(crate) fn menu_item(
+    ui: &mut egui::Ui,
+    text: impl AsRef<str>,
+    selected: bool,
+) -> egui::Response {
+    let theme = ui.ctx().shadcn_theme();
+    ui.scope(|ui| {
+        ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
+        ui.visuals_mut().selection.bg_fill = theme.accent;
+        ui.visuals_mut().selection.stroke = egui::Stroke::new(1.0, theme.foreground);
+        ui.add_sized(
+            [ui.available_width(), 28.0],
+            egui::Button::new(text.as_ref())
+                .selected(selected)
+                .frame_when_inactive(false),
+        )
+    })
+    .inner
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -692,6 +767,112 @@ mod tests {
                 let b = luminance(background);
                 assert!((a.max(b) + 0.05) / (a.min(b) + 0.05) >= 4.5);
             }
+        }
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f32 {
+        fn luminance(c: Color32) -> f32 {
+            let channel = |v: u8| {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            };
+            0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+        }
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    fn contains_field_fill(shape: &egui::epaint::Shape, field: egui::Rect, fill: Color32) -> bool {
+        match shape {
+            egui::epaint::Shape::Rect(rect) => {
+                rect.fill == fill
+                    && rect.rect.contains_rect(field.shrink(2.0))
+                    && rect.rect.width() <= field.width() + 4.0
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().any(|s| contains_field_fill(s, field, fill))
+            }
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn focused_input_and_selection_keep_readable_native_colors() {
+        for dark in [false, true] {
+            let mut value = "Readable focused input".to_owned();
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(320.0, 160.0))
+                .with_step_dt(0.2)
+                .with_max_steps(8)
+                .build_ui(|ui| {
+                    ui.ctx().set_theme(if dark {
+                        egui::ThemePreference::Dark
+                    } else {
+                        egui::ThemePreference::Light
+                    });
+                    rufus_style(ui.ctx(), dark);
+                    let label = ui.label("Volume label");
+                    let offered = ui.available_width();
+                    let response = input(ui, &mut value).labelled_by(label.id);
+                    response.request_focus();
+                    assert!(response.rect.width() <= offered + 0.5);
+                    assert!(response.rect.height() <= 34.0);
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("test-input-rect"), response.rect)
+                    });
+                    let selected = select(
+                        ui,
+                        "density-choice",
+                        &mut 0,
+                        &["First".into(), "Second".into()],
+                        "Choice",
+                    );
+                    assert!(selected.rect.width() <= offered + 0.5);
+                    assert!(selected.rect.height() <= 34.0);
+                });
+            harness.run_steps(3);
+            assert!(harness.get_by_label("Volume label").is_focused());
+            let theme = harness.ctx.shadcn_theme();
+            let visuals = harness.ctx.global_style().visuals.clone();
+            for widget in [visuals.widgets.active, visuals.widgets.open] {
+                assert_eq!(widget.bg_fill, theme.background);
+                assert_eq!(widget.weak_bg_fill, theme.background);
+                assert_eq!(widget.fg_stroke.color, theme.foreground);
+                assert!(contrast(widget.fg_stroke.color, widget.bg_fill) >= 4.5);
+                assert!(contrast(widget.bg_stroke.color, widget.bg_fill) >= 3.0);
+            }
+            assert_eq!(visuals.selection.stroke.color, theme.foreground);
+            assert_eq!(
+                visuals.selection.bg_fill,
+                if dark {
+                    Color32::from_rgb(49, 75, 108)
+                } else {
+                    Color32::from_rgb(202, 225, 250)
+                }
+            );
+            assert!(contrast(visuals.selection.stroke.color, visuals.selection.bg_fill) >= 4.5);
+            let field = harness
+                .ctx
+                .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("test-input-rect")))
+                .unwrap();
+            assert!(harness.output().shapes.iter().any(|s| contains_field_fill(
+                &s.shape,
+                field,
+                theme.background
+            )));
+            if dark {
+                assert!(!harness.output().shapes.iter().any(|s| contains_field_fill(
+                    &s.shape,
+                    field,
+                    Color32::WHITE
+                )));
+            }
+            drop(harness);
+            assert!(!value.is_empty());
         }
     }
 
