@@ -92,8 +92,8 @@ impl App {
                 let (eds, sel) = (&self.editions, &mut self.edition);
                 modal(ctx, "edition", &mut modal_open, |ui| {
                     ui.heading(t("MSG_118"));
-                    ui.label("Please select the edition you want to install:");
-                    combo(ui, "edition_choice", sel, eds);
+                    let label = ui.label("Please select the edition you want to install:");
+                    combo(ui, "edition_choice", sel, eds, label.id);
                     if let Some(ok) = ok_cancel(ui) {
                         if ok {
                             stage = Some(3)
@@ -116,8 +116,10 @@ impl App {
                     checkbox(ui, &mut o.bypass_hw_checks, t("MSG_329"));
                     checkbox(ui, &mut o.no_online_account, t("MSG_330"));
                     ui.horizontal(|ui| {
-                        checkbox(ui, use_acct, t("MSG_333"));
-                        ui.add_enabled_ui(*use_acct, |ui| input(ui, user));
+                        let account_label = checkbox(ui, use_acct, t("MSG_333"));
+                        ui.add_enabled_ui(*use_acct, |ui| {
+                            input(ui, user).labelled_by(account_label.id)
+                        });
                     });
                     checkbox(ui, &mut o.regional, t("MSG_334"));
                     checkbox(ui, &mut o.no_data_collection, t("MSG_331"));
@@ -135,7 +137,7 @@ impl App {
                 modal(ctx, "hybrid", &mut modal_open, |ui| {
                     ui.heading(tf("MSG_274", &["ISOHybrid"]));
                     let (iso, dd_s) = (t("MSG_036"), t("MSG_095"));
-                    ui.label(tf("MSG_275", &[&iso, &dd_s, &iso, &dd_s]));
+                    let label = ui.label(tf("MSG_275", &[&iso, &dd_s, &iso, &dd_s]));
                     combo(
                         ui,
                         "hybrid_mode",
@@ -144,6 +146,7 @@ impl App {
                             (false, tf("MSG_276", &[&iso])),
                             (true, tf("MSG_277", &[&dd_s])),
                         ],
+                        label.id,
                     );
                     if let Some(ok) = ok_cancel(ui) {
                         chosen = Some(ok.then_some(*dd));
@@ -180,12 +183,13 @@ impl App {
                         Some(h) => {
                             egui::Grid::new("hashes").num_columns(2).show(ui, |ui| {
                                 for (name, v) in ["MD5", "SHA1", "SHA256", "SHA512"].iter().zip(h) {
-                                    ui.label(*name);
+                                    let label = ui.label(*name);
                                     let mut v = v.as_str();
                                     ui.add(
                                         // The shared input edits Strings; checksum values stay read-only.
                                         Input::new(&mut v).max_width(340.0),
-                                    );
+                                    )
+                                    .labelled_by(label.id);
                                     ui.end_row();
                                 }
                             });
@@ -240,9 +244,9 @@ impl App {
                             ui.label(t("MSG_142"));
                         });
                     } else if st.chosen.len() < fido::FIELDS.len() && !st.options.is_empty() {
-                        ui.label(fido::FIELDS[st.chosen.len()]);
+                        let label = ui.label(fido::FIELDS[st.chosen.len()]);
                         let opts: Vec<_> = st.options.iter().cloned().enumerate().collect();
-                        combo(ui, "fido_opt", &mut st.pick, &opts);
+                        combo(ui, "fido_opt", &mut st.pick, &opts, label.id);
                     }
                     ui.horizontal(|ui| {
                         let last = st.chosen.len() + 1 == fido::FIELDS.len();
@@ -433,7 +437,7 @@ impl App {
                 egui::Grid::new("update_policy")
                     .num_columns(2)
                     .show(ui, |ui| {
-                        ui.label(t("IDS_UPDATE_FREQUENCY_TXT"));
+                        let label = ui.label(t("IDS_UPDATE_FREQUENCY_TXT"));
                         let name = |i: Interval| {
                             if i == Interval::default() {
                                 tf("MSG_030", &[&t(i.loc_id())])
@@ -443,10 +447,16 @@ impl App {
                         };
                         let intervals: Vec<_> =
                             Interval::ALL.into_iter().map(|i| (i, name(i))).collect();
-                        combo(ui, "update_interval", &mut policy.interval, &intervals);
+                        combo(
+                            ui,
+                            "update_interval",
+                            &mut policy.interval,
+                            &intervals,
+                            label.id,
+                        );
                         ui.end_row();
-                        ui.label(t("IDS_INCLUDE_BETAS_TXT"));
-                        checkbox(ui, &mut policy.include_betas, "");
+                        let label = ui.label(t("IDS_INCLUDE_BETAS_TXT"));
+                        checkbox(ui, &mut policy.include_betas, "").labelled_by(label.id);
                         ui.end_row();
                     });
                 ui.horizontal(|ui| {

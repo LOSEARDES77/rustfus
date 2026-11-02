@@ -4,88 +4,61 @@
 //! Rufus-look egui helpers shared by the main window and dialogs.
 
 use eframe::egui::{self, Color32, RichText};
+use functora_egui::{
+    Button, ButtonVariant, Checkbox, ComponentSize, Dialog, Input, LucideIcon, Progress,
+    SelectLabeled, Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
+};
 use rustfus_core::image;
 use rustfus_core::loc::{t, tf};
-use shadcn_egui::{Theme, components::{button::{Button, ButtonSize, ButtonVariant}, checkbox::Checkbox,
-    dialog::Dialog, input::Input, label::Label, progress::{Progress, ProgressVariant},
-    select::{Select, SelectSize}, separator::Separator}, style::{AppVariant, Paint, Role}};
 
 pub(crate) const RUFUS_GREEN: Color32 = Color32::from_rgb(0x06, 0xb0, 0x25);
-const STATUS: AppVariant<ProgressVariant> = ProgressVariant::app("rufus-status");
 
-fn rufus_theme() -> Theme {
-    let mut theme = Theme::vega().color(Role::custom("rufus-green"), RUFUS_GREEN, RUFUS_GREEN).variant(STATUS, ProgressVariant::Default, |r, _| {
-        r.progress_indicator.bg.set(Paint::Role(Role::custom("rufus-green"), 1.0));
-    });
+fn rufus_theme(dark: bool) -> ShadcnTheme {
+    let mut theme = if dark {
+        functora_egui::theme::shadcn_theme_dark::dark()
+    } else {
+        functora_egui::theme::shadcn_theme_light::light()
+    };
     theme.radius = 4.0;
-    theme.metrics.text_heading = 20.0;
-    theme.light.border = Color32::from_gray(128);
-    theme.light.input = Color32::from_gray(128);
-    theme.light.ring = Color32::from_rgb(0, 112, 24);
-    theme.dark.border = Color32::from_gray(140);
-    theme.dark.input = Color32::from_gray(140);
-    theme.dark.ring = RUFUS_GREEN;
+    // Keep action controls neutral; green is reserved for the status indicator.
+    theme.primary = theme.foreground;
+    theme.primary_foreground = theme.background;
     theme
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use egui_kittest::{Harness, kittest::{Queryable, NodeT}};
-
-    #[test]
-    fn action_labels_are_sentence_case() {
-        assert_eq!(action_label("SELECT"), "Select");
-        assert_eq!(action_label("CHECK NOW"), "Check now");
-        assert_eq!(action_label("FreeDOS"), "FreeDOS");
-        assert_eq!(action_label(""), "");
-    }
-
-    #[test]
-    fn shadcn_button_is_keyboard_activatable() {
-        let mut activated = false;
-        let mut harness = Harness::new_ui(|ui| {
-            if ui.add(button("START")).clicked() {
-                activated = true;
-            }
-        });
-        let start = harness.get_by_label("Start");
-        start.focus();
-        harness.run();
-        harness.key_press(egui::Key::Enter);
-        harness.run();
-        drop(harness);
-        assert!(activated);
-    }
-
-    #[test]
-    fn shadcn_checkbox_exposes_toggle_state() {
-        let mut checked = false;
-        let mut harness = Harness::new_ui(|ui| {
-            checkbox(ui, &mut checked, "Verify write");
-        });
-        let verify = harness.get_by_label("Verify write");
-        assert_eq!(verify.accesskit_node().toggled(), Some(egui::accesskit::Toggled::False));
-        verify.focus();
-        harness.run();
-        harness.key_press(egui::Key::Space);
-        harness.run();
-        drop(harness);
-        assert!(checked);
-    }
-}
-
+/// Update palette tokens without changing the user's system/light/dark preference.
 pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
     let installed = egui::Id::new("rustfus-theme-installed");
-    if !ctx.data(|d| d.get_temp::<bool>(installed).unwrap_or(false)) {
-        rufus_theme().apply(ctx);
+    let previous = ctx.data(|d| d.get_temp::<bool>(installed));
+    if previous.is_none() {
+        functora_egui::setup_fonts(ctx);
+        for (name, data) in script_fonts().font_data {
+            ctx.add_font(egui::epaint::text::FontInsert::new(
+                &name,
+                (*data).clone(),
+                [egui::FontFamily::Proportional, egui::FontFamily::Monospace]
+                    .into_iter()
+                    .map(|family| egui::epaint::text::InsertFontFamily {
+                        family,
+                        priority: egui::epaint::text::FontPriority::Lowest,
+                    })
+                    .collect(),
+            ));
+        }
         ctx.all_styles_mut(|s| {
             s.spacing.item_spacing.y = 6.0;
             s.spacing.window_margin = egui::Margin::same(12);
         });
-        ctx.data_mut(|d| d.insert_temp(installed, true));
     }
-    ctx.set_theme(if dark { egui::ThemePreference::Dark } else { egui::ThemePreference::Light });
+    if previous != Some(dark) {
+        ctx.set_shadcn_theme(rufus_theme(dark));
+        ctx.data_mut(|d| d.insert_temp(installed, dark));
+    }
+}
+
+/// Call each frame after egui has resolved the system theme or explicit preference.
+pub(crate) fn sync_style(ctx: &egui::Context) {
+    rufus_style(ctx, ctx.theme() == egui::Theme::Dark);
 }
 
 /// Normalize shouting action translations without rewriting technical option labels.
@@ -96,90 +69,211 @@ fn action_label(text: &str) -> String {
     }
     let lower = text.to_lowercase();
     let mut first = true;
-    lower.chars().flat_map(|c| {
-        if first && c.is_alphabetic() {
-            first = false;
-            c.to_uppercase().collect::<Vec<_>>()
-        } else { vec![c] }
-    }).collect()
+    lower
+        .chars()
+        .flat_map(|c| {
+            if first && c.is_alphabetic() {
+                first = false;
+                c.to_uppercase().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            }
+        })
+        .collect()
 }
 
-pub(crate) fn button(text: impl AsRef<str>) -> Button {
-    Button::new(action_label(text.as_ref())).variant(ButtonVariant::Outline).size(ButtonSize::Sm)
+pub(crate) fn button(text: impl AsRef<str>) -> Button<'static> {
+    Button::new(action_label(text.as_ref()))
+        .variant(ButtonVariant::Outline)
+        .size(ComponentSize::Sm)
 }
 
-pub(crate) fn icon_button(text: impl AsRef<str>, name: &str) -> Button {
-    use shadcn_egui::icons::lucide;
+pub(crate) struct IconButton {
+    label: String,
+    icon: LucideIcon,
+    has_popup: bool,
+}
+
+impl IconButton {
+    pub(crate) fn has_popup(mut self, has_popup: bool) -> Self {
+        self.has_popup = has_popup;
+        self
+    }
+}
+
+impl egui::Widget for IconButton {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let response = ui.add(
+            Button::icon_only(self.icon)
+                .variant(ButtonVariant::Ghost)
+                .size(ComponentSize::Sm),
+        );
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &self.label)
+        });
+        if self.has_popup {
+            response.ctx.accesskit_node_builder(response.id, |node| {
+                node.set_has_popup(egui::accesskit::HasPopup::Menu);
+            });
+        }
+        response.on_hover_text(self.label)
+    }
+}
+
+pub(crate) fn icon_button(text: impl AsRef<str>, name: &str) -> IconButton {
     let icon = match name {
-        "save" => lucide::SAVE,
-        "hash" => lucide::HASH,
-        "languages" => lucide::LANGUAGES,
-        "info" => lucide::INFO,
-        "settings" => lucide::SETTINGS,
-        "logs" => lucide::LOGS,
-        "chevron-down" => lucide::CHEVRON_DOWN,
+        "save" => LucideIcon::Save,
+        "hash" => LucideIcon::Hash,
+        "languages" => LucideIcon::Languages,
+        "info" => LucideIcon::Info,
+        "settings" => LucideIcon::Settings,
+        "logs" => LucideIcon::Logs,
+        "chevron-down" => LucideIcon::ChevronDown,
         _ => panic!("unknown application icon: {name}"),
     };
-    button(text).variant(ButtonVariant::Ghost).size(ButtonSize::IconSm).icon(&icon)
+    IconButton {
+        label: action_label(text.as_ref()),
+        icon,
+        has_popup: false,
+    }
 }
 
-pub(crate) fn checkbox(ui: &mut egui::Ui, value: &mut bool, text: impl Into<String>) -> egui::Response {
-    ui.horizontal_wrapped(|ui| {
-        let mut response = ui.add(Checkbox::new(value));
-        let label = ui.add(Label::new(text));
-        response = response.labelled_by(label.id);
-        if ui.interact(label.rect, label.id.with("toggle"), egui::Sense::click()).clicked() && ui.is_enabled() {
-            *value = !*value;
-            response.mark_changed();
-        }
-        response
-    }).inner
+pub(crate) fn checkbox(
+    ui: &mut egui::Ui,
+    value: &mut bool,
+    text: impl Into<String>,
+) -> egui::Response {
+    let text = text.into();
+    let response = ui.add(Checkbox::new(value).label(text.clone()));
+    response.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, ui.is_enabled(), *value, &text)
+    });
+    response
 }
 
 pub(crate) fn input(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
-    ui.add(Input::new(value).max_width(f32::INFINITY))
+    ui.add(Input::new(value).desired_width(ui.available_width()))
 }
 
-pub(crate) fn select(ui: &mut egui::Ui, id: &str, value: &mut usize, choices: &[String], placeholder: &str) -> egui::Response {
-    let options: Vec<_> = choices.iter().map(String::as_str).collect();
-    ui.add(Select::new(id, value, &options).size(SelectSize::Sm).width(ui.available_width()).placeholder(placeholder).enabled(!options.is_empty()))
+pub(crate) fn select(
+    ui: &mut egui::Ui,
+    id: &str,
+    value: &mut usize,
+    choices: &[String],
+    placeholder: &str,
+) -> egui::Response {
+    let before = *value;
+    let entries: Vec<_> = choices.iter().cloned().enumerate().collect();
+    let mut selected = choices.get(*value).map(|_| *value);
+    let mut response = ui
+        .push_id(id, |ui| {
+            ui.add_enabled(
+                !entries.is_empty(),
+                SelectLabeled::new(&mut selected, &entries)
+                    .width(ui.available_width())
+                    .placeholder(placeholder),
+            )
+        })
+        .inner;
+    // Upstream paints the select but does not publish metadata or mark changes.
+    if response.has_focus() && response.enabled() && !choices.is_empty() {
+        let next = ui.input_mut(|i| {
+            if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) {
+                Some(selected.map_or(0, |i| (i + 1).min(choices.len() - 1)))
+            } else if i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) {
+                Some(selected.unwrap_or(0).saturating_sub(1))
+            } else if i.consume_key(egui::Modifiers::NONE, egui::Key::Home) {
+                Some(0)
+            } else if i.consume_key(egui::Modifiers::NONE, egui::Key::End) {
+                Some(choices.len() - 1)
+            } else {
+                None
+            }
+        });
+        if let Some(next) = next {
+            selected = Some(next);
+        }
+    }
+    if let Some(selected) = selected {
+        *value = selected;
+    }
+    if before != *value {
+        response.mark_changed();
+    }
+    response.widget_info(|| {
+        let mut info =
+            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, response.enabled(), placeholder);
+        info.current_text_value = choices.get(*value).cloned();
+        info
+    });
+    response
 }
 
 pub(crate) fn progress(ui: &mut egui::Ui, value: f32, text: impl AsRef<str>) -> egui::Response {
     let label = ui.label(RichText::new(text.as_ref()).strong());
-    ui.add(Progress::new(value.clamp(0.0, 1.0)).variant(STATUS)).labelled_by(label.id)
+    let theme = ui.ctx().shadcn_theme();
+    let mut progress_theme = theme.clone();
+    progress_theme.primary = RUFUS_GREEN;
+    // Progress 0.2 has no fill builder; scope only its token lookup, not egui styles.
+    let key = egui::Id::NULL;
+    ui.ctx().data_mut(|d| d.insert_temp(key, progress_theme));
+    let response = ui.add(Progress::new(value));
+    ui.ctx().data_mut(|d| d.insert_temp(key, theme));
+    response.labelled_by(label.id)
+}
+
+pub(crate) fn spinner(ui: &mut egui::Ui) -> egui::Response {
+    ui.add(Spinner::new())
 }
 
 pub(crate) fn separator(ui: &mut egui::Ui) -> egui::Response {
-    ui.add(Separator::new())
+    ui.add(Separator::horizontal())
 }
 
-pub(crate) fn modal(ctx: &egui::Context, id: &str, open: &mut bool, body: impl FnOnce(&mut egui::Ui)) {
-    Dialog::new(id, "").width(460.0).show_close_button(false).show(ctx, open, |ui| {
-        egui::ScrollArea::vertical().max_height((ctx.content_rect().height() - 100.0).max(80.0)).show(ui, body);
-    });
+pub(crate) fn modal(
+    ctx: &egui::Context,
+    id: &str,
+    open: &mut bool,
+    body: impl FnOnce(&mut egui::Ui),
+) {
+    if !*open {
+        return;
+    }
+    // Dialog 0.2 uses fixed Area IDs and has no focus barrier or Escape handling.
+    // The uniquely identified egui modal supplies input isolation; functora owns
+    // the visible dialog and all controls. Scope child IDs by the caller's ID.
+    let guard = egui::Modal::new(egui::Id::new(("rustfus-modal", id)))
+        .backdrop_color(Color32::TRANSPARENT)
+        .frame(egui::Frame::NONE)
+        .show(ctx, |_| {
+            Dialog::new().width(460.0).show(ctx, open, |ui| {
+                ui.push_id(id, |ui| {
+                    egui::ScrollArea::vertical()
+                        .max_height((ctx.content_rect().height() - 100.0).max(80.0))
+                        .show(ui, body);
+                });
+            });
+        });
+    if guard.should_close() {
+        *open = false;
+    }
 }
 
 /// egui's built-in fonts lack CJK, Thai, Arabic and Hebrew, used by the language
 /// names and translations, so add system fonts covering them as fallbacks.
-pub(crate) fn add_script_fonts(ctx: &egui::Context) {
-    let add = |name: &str, font: Vec<u8>, index: u32| {
-        let families: Vec<_> = ctx.fonts(|fonts| fonts.definitions().families.keys().cloned().collect());
-        let families = families.into_iter().map(|family| {
-                egui::epaint::text::InsertFontFamily {
-                    family,
-                    priority: egui::epaint::text::FontPriority::Lowest,
-                }
-            });
+fn script_fonts() -> egui::FontDefinitions {
+    let mut fonts = egui::FontDefinitions::empty();
+    let mut add = |name: &str, font: Vec<u8>, index: u32| {
         let data = egui::FontData {
             index,
             ..egui::FontData::from_owned(font)
         };
-        ctx.add_font(egui::epaint::text::FontInsert::new(
-            name,
-            data,
-            families.collect(),
-        ));
+        fonts
+            .font_data
+            .insert(name.into(), std::sync::Arc::new(data));
+        for family in fonts.families.values_mut() {
+            family.push(name.into());
+        }
     };
     if cfg!(target_os = "linux") {
         // One fc-match per script, skipping scripts an already added font covers.
@@ -193,7 +287,7 @@ pub(crate) fn add_script_fonts(ctx: &egui::Context) {
                 .args(["-f", "%{file}\t%{index}\t%{lang}", &format!(":lang={lang}")])
                 .output()
             else {
-                return;
+                break;
             };
             let out = String::from_utf8_lossy(&out.stdout);
             let mut it = out.split('\t');
@@ -230,21 +324,34 @@ pub(crate) fn add_script_fonts(ctx: &egui::Context) {
             }
         }
     }
+    fonts
 }
 
 /// Keep Rufus' heading-and-rule hierarchy without custom painting.
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(title).size(20.0).strong());
+        ui.label(RichText::new(title).size(18.0).strong());
         separator(ui);
     });
 }
 
 pub(crate) fn toggle(ui: &mut egui::Ui, open: &mut bool, what: &str) {
     let text = tf(if *open { "MSG_122" } else { "MSG_121" }, &[what]);
-    let icon = if *open { shadcn_egui::icons::lucide::CHEVRON_UP } else { shadcn_egui::icons::lucide::CHEVRON_DOWN };
-    if ui.add(button(text).variant(ButtonVariant::Ghost).icon(&icon).expanded(*open)).clicked() {
+    let icon = if *open {
+        LucideIcon::ChevronUp
+    } else {
+        LucideIcon::ChevronDown
+    };
+    if ui
+        .add(
+            button(text)
+                .variant(ButtonVariant::Ghost)
+                .icon(icon)
+                .selected(*open),
+        )
+        .clicked()
+    {
         *open = !*open;
     }
 }
@@ -280,12 +387,19 @@ pub(crate) fn combo<T: PartialEq + Copy>(
     id: &str,
     value: &mut T,
     items: &[(T, String)],
+    label: egui::Id,
 ) -> bool {
     let before = *value;
-    let mut selected = items.iter().position(|(v, _)| *v == before).unwrap_or(usize::MAX);
+    let mut selected = items
+        .iter()
+        .position(|(v, _)| *v == before)
+        .unwrap_or(usize::MAX);
     let choices: Vec<_> = items.iter().map(|(_, text)| text.clone()).collect();
-    if select(ui, id, &mut selected, &choices, "").changed()
-        && let Some((chosen, _)) = items.get(selected) {
+    if select(ui, id, &mut selected, &choices, "")
+        .labelled_by(label)
+        .changed()
+        && let Some((chosen, _)) = items.get(selected)
+    {
         *value = *chosen;
     }
     before != *value
@@ -327,8 +441,198 @@ pub(crate) fn os_window(
     }
     ctx.show_viewport_immediate(egui::ViewportId::from_hash_of(id), builder, |ui, _| {
         egui::CentralPanel::default_margins().show(ui, |ui| add(ui));
-        if ui.ctx().input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape)) {
+        if ui
+            .ctx()
+            .input(|i| i.viewport().close_requested() || i.key_pressed(egui::Key::Escape))
+        {
             *open = false;
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui_kittest::{
+        Harness,
+        kittest::{NodeT, Queryable},
+    };
+
+    #[test]
+    fn theme_initializes_before_the_first_frame() {
+        let ctx = egui::Context::default();
+        rufus_style(&ctx, false);
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            ui.add(button("START"));
+            checkbox(ui, &mut false, "確認 — בדיקה");
+        });
+        output.textures_delta.clear();
+        assert!(!output.shapes.is_empty());
+        rufus_style(&ctx, true);
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            ui.add(button("CANCEL"));
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn action_labels_are_sentence_case() {
+        assert_eq!(action_label("SELECT"), "Select");
+        assert_eq!(action_label("CHECK NOW"), "Check now");
+        assert_eq!(action_label("FreeDOS"), "FreeDOS");
+        assert_eq!(action_label("  CHECK NOW  "), "Check now");
+        assert_eq!(action_label(""), "");
+    }
+
+    #[test]
+    fn status_colors_have_readable_text() {
+        fn luminance(c: Color32) -> f32 {
+            fn channel(v: u8) -> f32 {
+                let v = f32::from(v) / 255.0;
+                if v <= 0.03928 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            }
+            0.2126 * channel(c.r()) + 0.7152 * channel(c.g()) + 0.0722 * channel(c.b())
+        }
+        for dark in [false, true] {
+            let theme = rufus_theme(dark);
+            for (foreground, background) in [
+                (theme.foreground, theme.background),
+                (theme.primary_foreground, theme.primary),
+                (theme.muted_foreground, theme.background),
+            ] {
+                let a = luminance(foreground);
+                let b = luminance(background);
+                assert!((a.max(b) + 0.05) / (a.min(b) + 0.05) >= 4.5);
+            }
+        }
+    }
+
+    #[test]
+    fn palette_sync_preserves_preference_and_unrelated_style() {
+        let ctx = egui::Context::default();
+        ctx.set_theme(egui::ThemePreference::System);
+        rufus_style(&ctx, false);
+        assert_eq!(
+            ctx.options(|o| o.theme_preference),
+            egui::ThemePreference::System
+        );
+        assert_eq!(ctx.shadcn_theme().border, rufus_theme(false).border);
+        ctx.style_mut_of(ctx.theme(), |s| s.spacing.item_spacing.y = 17.0);
+        rufus_style(&ctx, false);
+        assert_eq!(ctx.style_of(ctx.theme()).spacing.item_spacing.y, 17.0);
+        rufus_style(&ctx, true);
+        assert_eq!(ctx.shadcn_theme().border, rufus_theme(true).border);
+        assert_eq!(
+            ctx.options(|o| o.theme_preference),
+            egui::ThemePreference::System
+        );
+        assert_eq!(ctx.style_of(ctx.theme()).spacing.item_spacing.y, 17.0);
+    }
+
+    #[test]
+    fn icon_button_exposes_name_and_keyboard_action() {
+        let mut activated = false;
+        let mut harness = Harness::new_ui(|ui| {
+            if ui.add(icon_button("SETTINGS", "settings")).clicked() {
+                activated = true;
+            }
+        });
+        harness.get_by_label("Settings").focus();
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        drop(harness);
+        assert!(activated);
+    }
+
+    #[test]
+    fn select_keyboard_preserves_duplicate_label_identity() {
+        let mut selected = 0;
+        let choices = vec!["Same".into(), "Same".into(), "Other".into()];
+        let mut changed = false;
+        let mut harness = Harness::new_ui(|ui| {
+            changed |= select(ui, "choice", &mut selected, &choices, "Image source").changed();
+        });
+        harness.get_by_label("Image source").focus();
+        harness.run();
+        harness.key_press(egui::Key::ArrowDown);
+        harness.run();
+        drop(harness);
+        assert_eq!(selected, 1);
+        assert!(changed);
+    }
+
+    #[test]
+    fn modal_escape_closes_without_activating_background() {
+        let mut open = true;
+        let mut background_activated = false;
+        let mut harness = Harness::new_ui(|ui| {
+            if ui.add(button("Background action")).clicked() {
+                background_activated = true;
+            }
+            modal(ui.ctx(), "confirm-write", &mut open, |ui| {
+                ui.add(icon_button("Dialog settings", "settings"));
+            });
+        });
+        harness.run();
+        harness.get_by_label("Dialog settings").focus();
+        harness.run();
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        drop(harness);
+        assert!(!open);
+        assert!(!background_activated);
+    }
+
+    #[test]
+    fn progress_does_not_leak_green_tokens() {
+        let ctx = egui::Context::default();
+        rufus_style(&ctx, false);
+        let primary = ctx.shadcn_theme().primary;
+        let mut output = ctx.run_ui(Default::default(), |ui| {
+            progress(ui, 0.5, "Ready");
+            assert_eq!(ui.ctx().shadcn_theme().primary, primary);
+            assert_eq!(ui.visuals().hyperlink_color, primary);
+        });
+        output.textures_delta.clear();
+    }
+
+    #[test]
+    fn functora_button_is_keyboard_activatable() {
+        let mut activated = false;
+        let mut harness = Harness::new_ui(|ui| {
+            if ui.add(button("START")).clicked() {
+                activated = true;
+            }
+        });
+        harness.key_press(egui::Key::Tab);
+        harness.run();
+        harness.key_press(egui::Key::Enter);
+        harness.run();
+        drop(harness);
+        assert!(activated);
+    }
+
+    #[test]
+    fn functora_checkbox_exposes_toggle_state() {
+        let mut checked = false;
+        let mut harness = Harness::new_ui(|ui| {
+            checkbox(ui, &mut checked, "Verify write");
+        });
+        let verify = harness.get_by_label("Verify write");
+        assert_eq!(
+            verify.accesskit_node().toggled(),
+            Some(egui::accesskit::Toggled::False)
+        );
+        verify.focus();
+        harness.run();
+        harness.key_press(egui::Key::Space);
+        harness.run();
+        drop(harness);
+        assert!(checked);
+    }
 }

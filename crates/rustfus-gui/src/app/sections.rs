@@ -15,6 +15,18 @@ use rustfus_core::{image, loc, ops};
 use shadcn_egui::components::{button::ButtonVariant, popover::Popover, slider::Slider};
 use std::sync::atomic::Ordering;
 
+const PERSISTENCE_STEP_MB: u64 = 256;
+
+fn persistence_slots(max_mb: u64) -> u64 {
+    max_mb.div_ceil(PERSISTENCE_STEP_MB)
+}
+
+fn persistence_mb_from_slot(slot: f32, max_mb: u64) -> u64 {
+    let slots = persistence_slots(max_mb);
+    let slot = (slot.round() as u64).min(slots);
+    slot.saturating_mul(PERSISTENCE_STEP_MB).min(max_mb)
+}
+
 impl App {
     pub(super) fn drive_section(&mut self, ui: &mut egui::Ui) {
         section(ui, &t("IDS_DRIVE_PROPERTIES_TXT"));
@@ -74,7 +86,7 @@ impl App {
             }
         });
 
-        ui.label(t("IDS_BOOT_SELECTION_TXT"));
+        let boot_label = ui.label(t("IDS_BOOT_SELECTION_TXT"));
         ui.horizontal(|ui| {
             let name = match &self.image {
                 Some(p) => p
@@ -94,7 +106,10 @@ impl App {
                     BootSel::FreeDos => 1,
                     BootSel::NonBootable => 2,
                 };
-                if select(ui, "boot", &mut selected, &choices, &t("MSG_280")).changed() {
+                if select(ui, "boot", &mut selected, &choices, &t("MSG_280"))
+                    .labelled_by(boot_label.id)
+                    .changed()
+                {
                     self.boot = match selected {
                         1 => BootSel::FreeDos,
                         2 => BootSel::NonBootable,
@@ -172,13 +187,13 @@ impl App {
         });
 
         if self.iso_mode() && self.report.windows {
-            ui.label(t("IDS_IMAGE_OPTION_TXT"));
+            let image_label = ui.label(t("IDS_IMAGE_OPTION_TXT"));
             let before = self.wtg;
             let mut choices = vec![(false, t("MSG_117"))];
             if cfg!(windows) {
                 choices.push((true, t("MSG_118")));
             }
-            combo(ui, "imgopt", &mut self.wtg, &choices);
+            combo(ui, "imgopt", &mut self.wtg, &choices, image_label.id);
             if !cfg!(windows) {
                 ui.label("Windows To Go needs DISM and bcdboot, which only exist on Windows.");
             }
@@ -191,32 +206,28 @@ impl App {
             ui.label(t("MSG_123"));
             let max = self
                 .drive()
-                .map(|d| d.size.saturating_sub(self.report.size + 64 * MB) / MB)
+                .map(|d| {
+                    d.size
+                        .saturating_sub(self.report.size.saturating_add(64 * MB))
+                        / MB
+                })
                 .unwrap_or(0);
             self.persistence_mb = if self.persistence_mb == 0 {
                 0
             } else {
                 self.persistence_mb.max(256.min(max)).min(max)
             };
-            let mut fraction = if max == 0 {
-                0.0
-            } else {
-                (self.persistence_mb as f64 / max as f64) as f32
-            };
+            let mut slot = persistence_slots(self.persistence_mb) as f32;
             if ui
                 .add(
-                    Slider::new(&mut fraction, 0.0..=1.0)
+                    Slider::new(&mut slot, 0.0..=persistence_slots(max) as f32)
+                        .step(1.0)
                         .enabled(max > 0)
                         .label(t("MSG_123")),
                 )
                 .changed()
             {
-                let mb = ((fraction as f64 * max as f64).round() as u64).min(max);
-                self.persistence_mb = if mb == 0 {
-                    0
-                } else {
-                    mb.max(256.min(max)).min(max)
-                };
+                self.persistence_mb = persistence_mb_from_slot(slot, max);
             }
             ui.label(format!("{} MB", self.persistence_mb));
         }
@@ -224,19 +235,25 @@ impl App {
         let formatting = !self.dd;
         ui.add_enabled_ui(formatting, |ui| {
             ui.columns(2, |c| {
-                c[0].label(t("IDS_PARTITION_TYPE_TXT"));
+                let scheme_label = c[0].label(t("IDS_PARTITION_TYPE_TXT"));
                 let schemes = [
                     (Scheme::Mbr, "MBR".to_string()),
                     (Scheme::Gpt, "GPT".to_string()),
                 ];
-                if combo(&mut c[0], "scheme", &mut self.scheme, &schemes) {
+                if combo(
+                    &mut c[0],
+                    "scheme",
+                    &mut self.scheme,
+                    &schemes,
+                    scheme_label.id,
+                ) {
                     self.target = if self.scheme == Scheme::Gpt {
                         Target::Uefi
                     } else {
                         Target::BiosUefi
                     };
                 }
-                c[1].label(t("IDS_TARGET_SYSTEM_TXT"));
+                let target_label = c[1].label(t("IDS_TARGET_SYSTEM_TXT"));
                 let targets: Vec<(Target, String)> = match self.scheme {
                     Scheme::Gpt => vec![(Target::Uefi, Target::Uefi.name())],
                     Scheme::Mbr => [Target::BiosUefi, Target::Bios, Target::Uefi]
@@ -244,7 +261,13 @@ impl App {
                         .map(|t| (*t, t.name()))
                         .collect(),
                 };
-                combo(&mut c[1], "target", &mut self.target, &targets);
+                combo(
+                    &mut c[1],
+                    "target",
+                    &mut self.target,
+                    &targets,
+                    target_label.id,
+                );
             });
         });
 
@@ -276,8 +299,8 @@ impl App {
         section(ui, &t("IDS_FORMAT_OPTIONS_TXT"));
         let formatting = !self.dd;
         ui.add_enabled_ui(formatting, |ui| {
-            ui.label(t("IDS_LABEL_TXT"));
-            input(ui, &mut self.label);
+            let volume_label = ui.label(t("IDS_LABEL_TXT"));
+            input(ui, &mut self.label).labelled_by(volume_label.id);
             let big = self.drive().is_some_and(|d| d.size > 4 << 30);
             let default_fs = if self.report.large_file && self.image_mode() {
                 Fs::Ntfs
@@ -300,18 +323,24 @@ impl App {
                 })
                 .collect();
             ui.columns(2, |c| {
-                c[0].label(t("IDS_FILE_SYSTEM_TXT"));
-                if combo(&mut c[0], "fs", &mut self.fs, &fss) {
+                let fs_label = c[0].label(t("IDS_FILE_SYSTEM_TXT"));
+                if combo(&mut c[0], "fs", &mut self.fs, &fss, fs_label.id) {
                     self.cluster = 0;
                 }
-                c[1].label(t("IDS_CLUSTER_SIZE_TXT"));
+                let cluster_label = c[1].label(t("IDS_CLUSTER_SIZE_TXT"));
                 let cl: Vec<(u32, String)> = self
                     .fs
                     .clusters()
                     .into_iter()
                     .map(|v| (v, cluster_name(v)))
                     .collect();
-                combo(&mut c[1], "cluster", &mut self.cluster, &cl);
+                combo(
+                    &mut c[1],
+                    "cluster",
+                    &mut self.cluster,
+                    &cl,
+                    cluster_label.id,
+                );
             });
         });
         toggle(ui, &mut self.adv_format, &t("MSG_120"));
@@ -323,12 +352,12 @@ impl App {
                 checkbox(ui, &mut self.ext_label, t("IDC_EXTENDED_LABEL"));
             });
             ui.columns(2, |c| {
-                checkbox(&mut c[0], &mut self.bad_blocks, t("IDC_BAD_BLOCKS"));
+                let passes_label = checkbox(&mut c[0], &mut self.bad_blocks, t("IDC_BAD_BLOCKS"));
                 c[1].add_enabled_ui(self.bad_blocks, |ui| {
                     let passes: Vec<(u8, String)> = (0..image::BAD_BLOCK_MODES.len() as u8)
                         .map(|i| (i, bad_block_mode(i)))
                         .collect();
-                    combo(ui, "passes", &mut self.passes, &passes);
+                    combo(ui, "passes", &mut self.passes, &passes, passes_label.id);
                 });
             });
         }
@@ -339,8 +368,20 @@ impl App {
         ui.add_space(4.0);
         let (fraction, status) = if self.busy.is_some() {
             (self.progress, self.status.clone())
+        } else if self.scanning {
+            (0.0, "Scanning for devices…".into())
+        } else if self.scan_error.is_some() {
+            (0.0, "Device scan failed".into())
+        } else if let Some(success) = self.done {
+            if success {
+                (1.0, "DONE".into())
+            } else {
+                (self.progress, t("MSG_212"))
+            }
+        } else if self.drives.is_empty() {
+            (0.0, "No devices found".into())
         } else {
-            (1.0, t("MSG_210"))
+            (0.0, t("MSG_210"))
         };
         progress(ui, fraction, status);
         ui.add_space(10.0);
@@ -354,10 +395,12 @@ impl App {
             let lang = ui
                 .add(icon_button(t("MSG_273"), "languages"))
                 .on_hover_text(t("MSG_273"));
+            let language_label = ui.label(t("MSG_273"));
             let width = ui.available_width();
             ui.allocate_ui(egui::vec2(width, 32.0), |ui| {
                 ui.set_width(width);
-                let response = select(ui, "language", &mut current, &labels, &t("MSG_273"));
+                let response = select(ui, "language", &mut current, &labels, &t("MSG_273"))
+                    .labelled_by(language_label.id);
                 if lang.clicked() {
                     response.request_focus();
                     egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
@@ -416,5 +459,33 @@ impl App {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{persistence_mb_from_slot, persistence_slots};
+
+    #[test]
+    fn persistence_steps_include_off_minimum_and_exact_capacity() {
+        for max in [0, 1, 255, 256, 257, 1024, 1100, 16_000_000] {
+            let slots = persistence_slots(max);
+            assert_eq!(persistence_mb_from_slot(0.0, max), 0);
+            assert_eq!(persistence_mb_from_slot(1.0, max), 256.min(max));
+            assert_eq!(persistence_mb_from_slot(slots as f32, max), max);
+            let minimum_slot = persistence_slots(256.min(max)) as f32;
+            assert_eq!(persistence_mb_from_slot(minimum_slot - 1.0, max), 0);
+        }
+    }
+
+    #[test]
+    fn persistence_steps_clamp_out_of_range_values() {
+        for slot in [-100.0, f32::NEG_INFINITY, f32::NAN] {
+            assert_eq!(persistence_mb_from_slot(slot, 1100), 0);
+        }
+        for slot in [100.0, f32::INFINITY, f32::MAX] {
+            assert_eq!(persistence_mb_from_slot(slot, 1100), 1100);
+        }
+        assert_eq!(persistence_mb_from_slot(f32::MAX, u64::MAX), u64::MAX);
     }
 }

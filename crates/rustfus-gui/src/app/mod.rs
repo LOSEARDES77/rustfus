@@ -6,7 +6,7 @@
 mod dialogs;
 mod sections;
 
-use crate::widgets::{add_script_fonts, rufus_style};
+use crate::widgets::rufus_style;
 use eframe::egui::{self};
 use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
@@ -196,7 +196,6 @@ fn spawn_scanner(
 impl App {
     fn new(cc: &eframe::CreationContext) -> Self {
         rufus_style(&cc.egui_ctx, false);
-        add_script_fonts(&cc.egui_ctx);
         loc::set_language(&loc::default_for_system());
         let list_all = Arc::new(AtomicBool::new(false));
         let rescan = Arc::new(AtomicBool::new(false));
@@ -668,8 +667,11 @@ impl eframe::App for App {
                         .unwrap_or(self.elapsed)
                         .as_secs();
                     ui.monospace(format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60));
-                    ui.add(shadcn_egui::components::separator::Separator::new()
-                        .orientation(shadcn_egui::components::separator::SeparatorOrientation::Vertical));
+                    ui.add(
+                        shadcn_egui::components::separator::Separator::new().orientation(
+                            shadcn_egui::components::separator::SeparatorOrientation::Vertical,
+                        ),
+                    );
                 });
             });
         });
@@ -740,6 +742,199 @@ pub fn run() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use egui_kittest::{
+        Harness,
+        kittest::{By, NodeT, Queryable},
+    };
+
+    fn form_app() -> (App, Sender<ScanResult>) {
+        let (tx, rx) = channel();
+        let mut app = App::with_inputs(
+            rx,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Some(update::Settings::default()),
+        );
+        app.scanning = false;
+        app.boot = BootSel::NonBootable;
+        app.set_drives(vec![drive()]);
+        (app, tx)
+    }
+
+    fn form_harness(app: App) -> Harness<'static, App> {
+        Harness::builder()
+            .with_size(egui::vec2(470.0, 900.0))
+            .build_ui_state(
+                |ui, app| {
+                    rufus_style(ui.ctx(), app.dark);
+                    app.poll();
+                    let form = egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            app.drive_section(ui);
+                            app.format_section(ui);
+                            app.status_section(ui);
+                        });
+                    let viewport = ui.ctx().content_rect();
+                    assert!(viewport.contains_rect(form.inner_rect));
+                    assert!(
+                        form.content_size.x <= form.inner_rect.width() + 1.0,
+                        "horizontal form overflow: {:?}",
+                        form.content_size
+                    );
+                    app.dialogs(ui.ctx());
+                },
+                app,
+            )
+    }
+
+    fn action_text(key: &str) -> String {
+        let text = t(key);
+        if text.chars().any(char::is_uppercase) && !text.chars().any(char::is_lowercase) {
+            let mut chars = text.chars();
+            chars.next().map_or_else(String::new, |first| {
+                first.to_string() + &chars.as_str().to_lowercase()
+            })
+        } else {
+            text
+        }
+    }
+
+    #[test]
+    fn whole_form_fits_light_and_dark_with_advanced_options() {
+        for dark in [false, true] {
+            for advanced in [false, true] {
+                let (mut app, _scan_tx) = form_app();
+                app.dark = dark;
+                app.adv_drive = advanced;
+                app.adv_format = advanced;
+                let mut harness = form_harness(app);
+                harness.run();
+                for key in [
+                    "IDS_DEVICE_TXT",
+                    "IDS_BOOT_SELECTION_TXT",
+                    "IDS_PARTITION_TYPE_TXT",
+                    "IDS_TARGET_SYSTEM_TXT",
+                    "IDS_LABEL_TXT",
+                    "IDS_FILE_SYSTEM_TXT",
+                    "IDS_CLUSTER_SIZE_TXT",
+                ] {
+                    let label = t(key);
+                    let node = harness.get_by_label(&label);
+                    assert!(
+                        node.rect().left() >= 0.0 && node.rect().right() <= 470.0,
+                        "{key} horizontal overflow"
+                    );
+                }
+                if advanced {
+                    for key in [
+                        "IDC_LIST_USB_HDD",
+                        "IDC_OLD_BIOS_FIXES",
+                        "IDC_QUICK_FORMAT",
+                        "IDC_EXTENDED_LABEL",
+                        "IDC_BAD_BLOCKS",
+                    ] {
+                        let label = t(key);
+                        harness.get_by_label(&label);
+                    }
+                    harness.get_by_label("Verify write (DD mode)");
+                }
+                assert!(
+                    !harness
+                        .get_by_label(&action_text("IDC_START"))
+                        .accesskit_node()
+                        .is_disabled()
+                );
+                assert!(harness.state().busy.is_none());
+                assert!(harness.state().update_rx.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn scanning_and_scan_error_disable_start_without_starting_a_job() {
+        for scanning in [true, false] {
+            let (mut app, _scan_tx) = form_app();
+            app.scanning = scanning;
+            app.scan_error = (!scanning).then(|| "Synthetic scan failure".into());
+            let mut harness = form_harness(app);
+            harness.run();
+            let start = action_text("IDC_START");
+            assert!(harness.get_by_label(&start).accesskit_node().is_disabled());
+            harness.get_by_label(&start).click();
+            harness.run();
+            harness.state_mut().on_start();
+            assert!(matches!(harness.state().dialog, Dialog::None));
+            assert!(harness.state().busy.is_none());
+            assert!(harness.state().started.is_none());
+            assert!(!harness.state().rescan.load(Ordering::Relaxed));
+        }
+    }
+
+    #[test]
+    fn retry_scan_only_requests_the_synthetic_scanner() {
+        let (mut app, scan_tx) = form_app();
+        app.scan_error = Some("Synthetic scan failure".into());
+        let mut harness = form_harness(app);
+        harness.get_by_label("Retry scan").click();
+        harness.run();
+        assert!(harness.state().scanning);
+        assert!(harness.state().rescan.load(Ordering::Relaxed));
+        assert!(harness.state().busy.is_none());
+        scan_tx.send(Ok(vec![drive()])).unwrap();
+        harness.run();
+        assert!(!harness.state().scanning);
+        assert!(harness.state().scan_error.is_none());
+        assert_eq!(harness.state().drives, vec![drive()]);
+    }
+
+    #[test]
+    fn escape_cancels_confirmation_even_when_approval_has_focus() {
+        let (app, _scan_tx) = form_app();
+        let mut harness = form_harness(app);
+        harness.get_by_label(&action_text("IDC_START")).click();
+        harness.run();
+        assert!(matches!(harness.state().dialog, Dialog::Confirm));
+        let approve = action_text("IDOK");
+        harness
+            .get(
+                By::new()
+                    .role(egui::accesskit::Role::Button)
+                    .label(&approve),
+            )
+            .focus();
+        harness.run();
+        assert!(harness.get_by_label(&approve).is_focused());
+        // Never activate approval: this fixture deliberately has a selected drive.
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(matches!(harness.state().dialog, Dialog::None));
+        assert!(harness.state().busy.is_none());
+        assert!(harness.state().started.is_none());
+    }
+
+    #[test]
+    fn late_checksum_messages_do_not_reopen_a_dismissed_dialog() {
+        for completed in [false, true] {
+            let (mut app, _scan_tx) = form_app();
+            let (tx, rx) = channel();
+            app.hash_rx = Some(rx);
+            app.dialog = Dialog::Hash(None, 0.0);
+            tx.send((0.25, None)).unwrap();
+            app.poll();
+            assert!(matches!(app.dialog, Dialog::Hash(None, p) if p == 0.25));
+            app.dialog = Dialog::None;
+            let hashes = completed.then(|| std::array::from_fn(|i| format!("checksum-{i}")));
+            tx.send((0.75, hashes)).unwrap();
+            app.poll();
+            assert!(matches!(app.dialog, Dialog::None));
+            assert!(app.hash_rx.is_none());
+            assert!(tx.send((1.0, None)).is_err());
+            app.poll();
+            assert!(matches!(app.dialog, Dialog::None));
+            assert!(app.busy.is_none());
+        }
+    }
 
     fn drive() -> Drive {
         Drive {
