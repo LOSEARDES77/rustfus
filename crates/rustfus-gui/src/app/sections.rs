@@ -5,11 +5,13 @@
 
 use super::{App, BootSel, Dialog, FidoState, MB};
 use crate::widgets::{
-    bad_block_mode, button, checkbox, cluster_name, combo, icon_button, input, progress, section,
-    select, toggle,
+    action_label, bad_block_mode, button, checkbox, cluster_name, combo, icon_button, input,
+    progress, section, select, spinner, toggle,
 };
 use eframe::egui;
-use functora_egui::{Button, ButtonVariant, ComponentSize, Popover, Slider};
+use functora_egui::{
+    Button, ButtonGroup, ButtonVariant, ComponentSize, DropdownMenu, Popover, Slider,
+};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Fs, Scheme, Target};
 use rustfus_core::{image, loc, ops};
@@ -97,8 +99,8 @@ impl App {
                 None => tf("MSG_281", &[&t("MSG_280")]),
             };
             let before = self.boot;
-            let w = (ui.available_width() - 28.0 * 2.0 - 90.0 - ui.spacing().item_spacing.x * 3.0)
-                .max(1.0);
+            let w =
+                (ui.available_width() - 28.0 - 118.0 - ui.spacing().item_spacing.x * 2.0).max(1.0);
             ui.allocate_ui(egui::vec2(w, ui.spacing().interact_size.y), |ui| {
                 ui.set_max_width(w);
                 let choices = vec![name, "FreeDOS".into(), t("MSG_279")];
@@ -137,27 +139,37 @@ impl App {
             if hash.on_hover_text(t("MSG_314")).clicked() {
                 self.compute_hashes(ui.ctx());
             }
-            // Rufus' split button: SELECT, or DOWNLOAD (Fido) from the arrow menu.
             ui.add_enabled_ui(self.boot == BootSel::Image, |ui| {
-                let (select_text, download) = (t("IDC_SELECT"), t("MSG_040"));
+                let select_text = t("IDC_SELECT");
+                let download = t("MSG_040");
                 let text = if self.download_mode {
                     &download
                 } else {
                     &select_text
                 };
-                let main = ui.add(button(text).fixed_width(90.0));
-                let menu = ui.add(icon_button("Image source", "chevron-down").has_popup(true));
-                Popover::new().show(ui, &menu, |ui| {
-                    if ui.add(button(&select_text)).clicked() {
-                        self.download_mode = false;
-                        egui::Popup::close_all(ui.ctx());
-                    }
-                    if ui.add(button(&download)).clicked() {
-                        self.download_mode = true;
-                        egui::Popup::close_all(ui.ctx());
-                    }
+                let mut main_clicked = false;
+                ui.allocate_ui(egui::vec2(118.0, ui.spacing().interact_size.y), |ui| {
+                    ui.set_width(118.0);
+                    ButtonGroup::show(ui, |ui| {
+                        main_clicked = ui.add(button(text).fixed_width(90.0)).clicked();
+                        let menu = ui.add(
+                            icon_button("Image source", "chevron-down")
+                                .fixed_width(28.0)
+                                .variant(ButtonVariant::Outline)
+                                .has_popup(true),
+                        );
+                        DropdownMenu::show_value(
+                            ui,
+                            &menu,
+                            &[
+                                (false, action_label(&select_text)),
+                                (true, action_label(&download)),
+                            ],
+                            |mode| self.download_mode = mode,
+                        );
+                    });
                 });
-                if main.clicked() {
+                if main_clicked {
                     if self.download_mode {
                         let mut st = FidoState {
                             chosen: Vec::new(),
@@ -395,16 +407,21 @@ impl App {
                     .show(ui, |ui| {
                         for language in loc::languages() {
                             // Language names are data, not action labels: preserve their casing.
-                            if ui
-                                .add(
-                                    Button::new(&language.name)
-                                        .variant(ButtonVariant::Ghost)
-                                        .size(ComponentSize::Sm)
-                                        .selected(language.code == loc::current())
-                                        .full_width(),
+                            let response = ui.add(
+                                Button::new(&language.name)
+                                    .variant(ButtonVariant::Ghost)
+                                    .size(ComponentSize::Xs)
+                                    .selected(language.code == loc::current())
+                                    .full_width(),
+                            );
+                            response.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    response.enabled(),
+                                    &language.name,
                                 )
-                                .clicked()
-                            {
+                            });
+                            if response.clicked() {
                                 loc::set_language(&language.code);
                                 egui::Popup::close_all(ui.ctx());
                             }
@@ -418,12 +435,52 @@ impl App {
             {
                 self.show_about = true;
             }
-            if ui
-                .add(icon_button(t("MSG_301"), "settings"))
-                .on_hover_text(t("MSG_301"))
-                .clicked()
-            {
-                self.show_settings = true;
+            let theme = ui.add(icon_button("Theme", "theme").has_popup(true));
+            Popover::new().show(ui, &theme, |ui| {
+                let current = match self.theme_preference {
+                    egui::ThemePreference::System => "System",
+                    egui::ThemePreference::Light => "Light",
+                    egui::ThemePreference::Dark => "Dark",
+                };
+                ui.label(format!("Theme: {current}"));
+                for (preference, label) in [
+                    (egui::ThemePreference::System, "System"),
+                    (egui::ThemePreference::Light, "Light"),
+                    (egui::ThemePreference::Dark, "Dark"),
+                ] {
+                    if ui
+                        .add(
+                            button(label)
+                                .variant(ButtonVariant::Ghost)
+                                .fixed_width(120.0),
+                        )
+                        .clicked()
+                    {
+                        self.theme_preference = preference;
+                        ui.ctx().set_theme(preference);
+                        egui::Popup::close_all(ui.ctx());
+                    }
+                }
+            });
+            let updates = ui.add(icon_button("Check for updates", "updates").has_popup(true));
+            let checking = self.update_rx.is_some();
+            let mut check_updates = updates.clicked() && !checking;
+            Popover::new().show(ui, &updates, |ui| {
+                ui.set_width(240.0);
+                if checking {
+                    ui.horizontal(|ui| {
+                        spinner(ui);
+                        ui.label("Checking for updates…");
+                    });
+                } else if !self.update_note.is_empty() {
+                    ui.label(&self.update_note);
+                }
+                check_updates |= ui
+                    .add_enabled(!checking, button("Check for updates"))
+                    .clicked();
+            });
+            if check_updates {
+                self.check_updates(ui.ctx(), true);
             }
             if ui
                 .add(icon_button(t("MSG_303"), "logs"))
@@ -468,6 +525,52 @@ impl App {
 #[cfg(test)]
 mod tests {
     use super::{persistence_mb_from_slot, persistence_slots};
+
+    fn footer_harness() -> egui_kittest::Harness<'static, super::App> {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let app = super::App::with_inputs(
+            rx,
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Some(super::super::update::Settings::default()),
+        );
+        egui_kittest::Harness::builder()
+            .with_size(eframe::egui::vec2(470.0, 300.0))
+            .build_ui_state(|ui, app| app.footer(ui), app)
+    }
+
+    #[test]
+    fn footer_theme_choices_apply_without_a_settings_dialog() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = footer_harness();
+        for (label, preference) in [
+            ("Dark", eframe::egui::ThemePreference::Dark),
+            ("Light", eframe::egui::ThemePreference::Light),
+            ("System", eframe::egui::ThemePreference::System),
+        ] {
+            harness.get_by_label("Theme").click();
+            harness.run();
+            harness.get_by_label(label).click();
+            harness.run();
+            assert_eq!(harness.state().theme_preference, preference);
+        }
+    }
+
+    #[test]
+    fn footer_update_popover_does_not_restart_an_active_check() {
+        use egui_kittest::kittest::Queryable;
+
+        let mut harness = footer_harness();
+        let (_tx, rx) = std::sync::mpsc::channel();
+        harness.state_mut().update_rx = Some(rx);
+        let log = harness.state().log.clone();
+        harness.get_by_label("Check for updates").click();
+        harness.run_steps(3);
+        harness.get_by_label("Checking for updates…");
+        assert_eq!(harness.state().log, log);
+        assert!(harness.state().update_rx.is_some());
+    }
 
     #[test]
     fn persistence_steps_include_off_minimum_and_exact_capacity() {

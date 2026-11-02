@@ -1,16 +1,16 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright © 2026 Rustfus contributors
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
-//! START confirmation steps, the Fido download dialog, and the Log/About/Settings windows.
+//! START confirmation steps, the Fido download dialog, and the Log/About windows.
 
 use super::{App, Dialog, rustfus_name};
 use crate::widgets::{
-    button, checkbox, combo, input, modal, ok_cancel, os_window, progress, separator, spinner,
+    button, checkbox, combo, input, modal, ok_cancel, os_window, progress, spinner,
 };
 use eframe::egui::{self, Color32};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{self, Msg};
-use rustfus_core::update::{Interval, Version};
+use rustfus_core::update::Version;
 use rustfus_core::{drives, fido, net, syslinux};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -22,7 +22,8 @@ impl App {
         let mut download: Option<(String, PathBuf)> = None;
         let mut stage = None;
         let mut start = false;
-        let mut allow_updates = None;
+        let mut fido_query = false;
+        let mut fido_url = None;
         match &mut self.dialog {
             Dialog::None => {}
             Dialog::Download => {
@@ -207,16 +208,7 @@ impl App {
                     st.rx = None;
                     match r {
                         Ok(v) if st.chosen.len() == fido::FIELDS.len() => {
-                            let url = v[0].clone();
-                            let name = fido::file_name(&url);
-                            if let Some(path) = rfd::FileDialog::new()
-                                .set_file_name(&name)
-                                .add_filter(t("MSG_036"), &["iso"])
-                                .save_file()
-                            {
-                                download = Some((url, path));
-                            }
-                            next = Some(Dialog::None);
+                            fido_url = v.into_iter().next();
                         }
                         Ok(v) => {
                             st.options = v;
@@ -228,70 +220,67 @@ impl App {
                         }
                     }
                 }
-                let mut query = false;
-                modal(ctx, "fido", &mut modal_open, |ui| {
-                    ui.heading(t("MSG_149"));
-                    for (f, v) in fido::FIELDS.iter().zip(&st.chosen) {
-                        ui.label(format!("{f}: {v}"));
-                    }
-                    if let Some(err) = &st.error {
-                        ui.colored_label(Color32::RED, err);
-                    }
-                    if st.rx.is_some() {
+                let mut open = true;
+                let mut cancel = false;
+                os_window(
+                    ctx,
+                    "iso-download",
+                    &mut open,
+                    &t("MSG_149"),
+                    [440.0, 420.0],
+                    |ui| {
+                        for (f, v) in fido::FIELDS.iter().zip(&st.chosen) {
+                            ui.label(format!("{f}: {v}"));
+                        }
+                        if let Some(err) = &st.error {
+                            ui.colored_label(Color32::RED, err);
+                        }
+                        if st.rx.is_some() {
+                            ui.horizontal(|ui| {
+                                spinner(ui);
+                                ui.label(t("MSG_142"));
+                            });
+                        } else if st.chosen.len() < fido::FIELDS.len() && !st.options.is_empty() {
+                            let label = ui.label(fido::FIELDS[st.chosen.len()]);
+                            let opts: Vec<_> = st.options.iter().cloned().enumerate().collect();
+                            combo(ui, "fido_opt", &mut st.pick, &opts, label.id);
+                        }
                         ui.horizontal(|ui| {
-                            spinner(ui);
-                            ui.label(t("MSG_142"));
+                            let last = st.chosen.len() + 1 == fido::FIELDS.len();
+                            let ready = st.rx.is_none()
+                                && st.chosen.len() < fido::FIELDS.len()
+                                && !st.options.is_empty();
+                            if ui
+                                .add_enabled(
+                                    ready,
+                                    button(t(if last { "MSG_040" } else { "MSG_140" })),
+                                )
+                                .clicked()
+                            {
+                                st.chosen.push(st.options[st.pick].clone());
+                                fido_query = true;
+                            }
+                            if ui
+                                .add_enabled(
+                                    st.rx.is_none() && !st.chosen.is_empty(),
+                                    button(t("MSG_141")),
+                                )
+                                .clicked()
+                            {
+                                st.chosen.pop();
+                                fido_query = true;
+                            }
+                            if ui.add(button(t("MSG_006"))).clicked() {
+                                cancel = true;
+                            }
                         });
-                    } else if st.chosen.len() < fido::FIELDS.len() && !st.options.is_empty() {
-                        let label = ui.label(fido::FIELDS[st.chosen.len()]);
-                        let opts: Vec<_> = st.options.iter().cloned().enumerate().collect();
-                        combo(ui, "fido_opt", &mut st.pick, &opts, label.id);
-                    }
-                    ui.horizontal(|ui| {
-                        let last = st.chosen.len() + 1 == fido::FIELDS.len();
-                        let ready = st.rx.is_none() && !st.options.is_empty();
-                        if ui
-                            .add_enabled(ready, button(t(if last { "MSG_040" } else { "MSG_140" })))
-                            .clicked()
-                        {
-                            st.chosen.push(st.options[st.pick].clone());
-                            query = true;
-                        }
-                        if ui
-                            .add_enabled(
-                                st.rx.is_none() && !st.chosen.is_empty(),
-                                button(t("MSG_141")),
-                            )
-                            .clicked()
-                        {
-                            st.chosen.pop();
-                            query = true;
-                        }
-                        if ui.add(button(t("MSG_006"))).clicked() {
-                            next = Some(Dialog::None);
-                        }
-                    });
-                });
-                if query && modal_open {
-                    st.query(ctx);
+                    },
+                );
+                if !open || cancel {
+                    next = Some(Dialog::None);
+                    fido_query = false;
+                    fido_url = None;
                 }
-                if st.rx.is_some() {
-                    ctx.request_repaint_after(Duration::from_millis(200));
-                }
-            }
-            Dialog::UpdatePolicy => {
-                modal(ctx, "update_policy", &mut modal_open, |ui| {
-                    ui.heading(rustfus_name(&t("MSG_004")));
-                    ui.label(rustfus_name(&t("MSG_005")));
-                    ui.horizontal(|ui| {
-                        if ui.add(button(t("MSG_008"))).clicked() {
-                            allow_updates = Some(true);
-                        }
-                        if ui.add(button(t("MSG_009"))).clicked() {
-                            allow_updates = Some(false);
-                        }
-                    });
-                });
             }
             Dialog::NewVersion(r) => {
                 modal(ctx, "new_version", &mut modal_open, |ui| {
@@ -333,8 +322,31 @@ impl App {
             next = Some(Dialog::None);
             stage = None;
             start = false;
-            allow_updates = None;
+            fido_query = false;
+            fido_url = None;
             download = None;
+        }
+        if fido_query && let Dialog::Fido(st) = &mut self.dialog {
+            st.query(ctx);
+        }
+        if let Dialog::Fido(st) = &self.dialog
+            && st.rx.is_some()
+            && next.is_none()
+        {
+            let delay = Duration::from_millis(200);
+            ctx.request_repaint_after_for(delay, ctx.viewport_id());
+            ctx.request_repaint_after_for(delay, egui::ViewportId::from_hash_of("iso-download"));
+        }
+        if let Some(url) = fido_url {
+            let name = fido::file_name(&url);
+            if let Some(path) = rfd::FileDialog::new()
+                .set_file_name(&name)
+                .add_filter(t("MSG_036"), &["iso"])
+                .save_file()
+            {
+                download = Some((url, path));
+            }
+            next = Some(Dialog::None);
         }
         if let Some(d) = next {
             if matches!(self.dialog, Dialog::Hash(..)) && matches!(d, Dialog::None) {
@@ -344,19 +356,6 @@ impl App {
         }
         if let Some(st) = stage {
             self.dialog = self.next_dialog(st);
-        }
-        if let Some(allow) = allow_updates {
-            self.dialog = Dialog::None;
-            if !allow {
-                self.update.interval = Interval::Disabled;
-            }
-            if let Err(err) = self.update.save() {
-                self.log
-                    .push(format!("Could not save the update settings: {err}"));
-            }
-            if allow {
-                self.check_updates(ctx, /* manual= */ false);
-            }
         }
         if let Some((url, path)) = download {
             self.log.push(format!("Downloading {url}"));
@@ -425,79 +424,5 @@ impl App {
                 ui.label("License: GNU General Public License (GPL) version 3 or later.");
             },
         );
-        let mut theme_preference = self.theme_preference;
-        let mut policy = self.update.clone();
-        let (checking, note) = (self.update_rx.is_some(), &self.update_note);
-        let mut check_now = false;
-        os_window(
-            ctx,
-            "settings",
-            &mut self.show_settings,
-            &t("IDD_UPDATE_POLICY"),
-            [320.0, 150.0],
-            |ui| {
-                let label = ui.label("Theme");
-                combo(
-                    ui,
-                    "theme_preference",
-                    &mut theme_preference,
-                    &[
-                        (egui::ThemePreference::System, "System".into()),
-                        (egui::ThemePreference::Light, "Light".into()),
-                        (egui::ThemePreference::Dark, "Dark".into()),
-                    ],
-                    label.id,
-                );
-                separator(ui);
-                egui::Grid::new("update_policy")
-                    .num_columns(2)
-                    .show(ui, |ui| {
-                        let label = ui.label(t("IDS_UPDATE_FREQUENCY_TXT"));
-                        let name = |i: Interval| {
-                            if i == Interval::default() {
-                                tf("MSG_030", &[&t(i.loc_id())])
-                            } else {
-                                t(i.loc_id())
-                            }
-                        };
-                        let intervals: Vec<_> =
-                            Interval::ALL.into_iter().map(|i| (i, name(i))).collect();
-                        combo(
-                            ui,
-                            "update_interval",
-                            &mut policy.interval,
-                            &intervals,
-                            label.id,
-                        );
-                        ui.end_row();
-                        let label = ui.label(t("IDS_INCLUDE_BETAS_TXT"));
-                        checkbox(ui, &mut policy.include_betas, "").labelled_by(label.id);
-                        ui.end_row();
-                    });
-                ui.horizontal(|ui| {
-                    check_now = ui
-                        .add_enabled(!checking, button(t("IDC_CHECK_NOW")))
-                        .clicked();
-                    if checking {
-                        spinner(ui);
-                    }
-                    ui.label(note);
-                });
-            },
-        );
-        if theme_preference != self.theme_preference {
-            self.theme_preference = theme_preference;
-            ctx.set_theme(theme_preference);
-        }
-        if policy != self.update {
-            self.update = policy;
-            if let Err(err) = self.update.save() {
-                self.log
-                    .push(format!("Could not save the update settings: {err}"));
-            }
-        }
-        if check_now {
-            self.check_updates(ctx, /* manual= */ true);
-        }
     }
 }

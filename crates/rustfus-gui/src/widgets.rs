@@ -5,8 +5,8 @@
 
 use eframe::egui::{self, Color32, RichText};
 use functora_egui::{
-    Button as FunctoraButton, ButtonVariant, Checkbox, ComponentSize, Dialog, Input, LucideIcon,
-    Progress, SelectLabeled, Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
+    Button as FunctoraButton, ButtonVariant, Checkbox, ComponentSize, Dialog, LucideIcon, Progress,
+    Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
 };
 use rustfus_core::image;
 use rustfus_core::loc::{t, tf};
@@ -50,6 +50,7 @@ fn rufus_theme(dark: bool) -> ShadcnTheme {
         theme.input = gray(212);
         theme.ring = gray(115);
     }
+
     theme.card_foreground = theme.foreground;
     theme.popover_foreground = theme.foreground;
     theme.secondary_foreground = theme.foreground;
@@ -64,16 +65,40 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
     if previous.is_none() {
         let mut fonts = egui::FontDefinitions::default();
         fonts.font_data.insert(
-            "Inter".into(),
-            std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
-                "../../../res/fonts/inter.ttf"
-            ))),
+            "Inter Variable".into(),
+            std::sync::Arc::new(
+                egui::FontData::from_static(include_bytes!("../../../res/fonts/InterVariable.ttf"))
+                    .tweak(egui::FontTweak {
+                        coords: egui::epaint::text::VariationCoords::new([
+                            (b"wght", 400.0),
+                            (b"opsz", 14.0),
+                        ]),
+                        ..Default::default()
+                    }),
+            ),
         );
         fonts
             .families
             .entry(egui::FontFamily::Proportional)
             .or_default()
-            .insert(0, "Inter".into());
+            .insert(0, "Inter Variable".into());
+        let heading = egui::FontFamily::Name("Inter Heading".into());
+        fonts.font_data.insert(
+            "Inter Heading".into(),
+            std::sync::Arc::new(
+                egui::FontData::from_static(include_bytes!("../../../res/fonts/InterVariable.ttf"))
+                    .tweak(egui::FontTweak {
+                        coords: egui::epaint::text::VariationCoords::new([
+                            (b"wght", 550.0),
+                            (b"opsz", 20.0),
+                        ]),
+                        ..Default::default()
+                    }),
+            ),
+        );
+        let mut fallback = fonts.families[&egui::FontFamily::Proportional].clone();
+        fallback.insert(0, "Inter Heading".into());
+        fonts.families.insert(heading.clone(), fallback);
         for (name, data) in script_fonts().font_data {
             fonts.font_data.insert(name.clone(), data);
             for family in fonts.families.values_mut() {
@@ -84,6 +109,14 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
         ctx.all_styles_mut(|s| {
             s.spacing.item_spacing.y = 6.0;
             s.spacing.window_margin = egui::Margin::same(12);
+            s.spacing.interact_size.y = 28.0;
+            s.spacing.button_padding = egui::vec2(8.0, 4.0);
+            s.text_styles
+                .insert(egui::TextStyle::Body, egui::FontId::proportional(14.0));
+            s.text_styles
+                .insert(egui::TextStyle::Button, egui::FontId::proportional(14.0));
+            s.text_styles
+                .insert(egui::TextStyle::Heading, egui::FontId::proportional(20.0));
         });
     }
     if previous != Some(dark) {
@@ -94,7 +127,25 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
                 egui::Visuals::light()
             };
         });
-        ctx.set_shadcn_theme(rufus_theme(dark));
+        let theme = rufus_theme(dark);
+        ctx.set_shadcn_theme(theme.clone());
+        ctx.all_styles_mut(|s| {
+            for w in [
+                &mut s.visuals.widgets.inactive,
+                &mut s.visuals.widgets.hovered,
+                &mut s.visuals.widgets.active,
+            ] {
+                w.bg_fill = theme.background;
+                w.weak_bg_fill = theme.background;
+                w.bg_stroke = egui::Stroke::new(1.0, theme.input);
+                w.corner_radius = egui::CornerRadius::same(4);
+            }
+            s.visuals.widgets.hovered.bg_fill = theme.accent;
+            s.visuals.widgets.hovered.weak_bg_fill = theme.accent;
+            s.visuals.widgets.active.bg_stroke.color = theme.ring;
+            s.visuals.text_cursor.stroke.color = theme.foreground;
+            s.visuals.extreme_bg_color = theme.background;
+        });
         ctx.data_mut(|d| d.insert_temp(installed, dark));
     }
 }
@@ -105,7 +156,7 @@ pub(crate) fn sync_style(ctx: &egui::Context) {
 }
 
 /// Normalize shouting action translations without rewriting technical option labels.
-fn action_label(text: &str) -> String {
+pub(crate) fn action_label(text: &str) -> String {
     let text = text.trim();
     if !text.chars().any(char::is_uppercase) || text.chars().any(char::is_lowercase) {
         return text.into();
@@ -177,9 +228,19 @@ pub(crate) struct IconButton {
     label: String,
     icon: LucideIcon,
     has_popup: bool,
+    variant: ButtonVariant,
+    width: Option<f32>,
 }
 
 impl IconButton {
+    pub(crate) fn fixed_width(mut self, width: f32) -> Self {
+        self.width = Some(width);
+        self
+    }
+    pub(crate) fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.variant = variant;
+        self
+    }
     pub(crate) fn has_popup(mut self, has_popup: bool) -> Self {
         self.has_popup = has_popup;
         self
@@ -188,11 +249,13 @@ impl IconButton {
 
 impl egui::Widget for IconButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
-        let response = ui.add(
-            FunctoraButton::icon_only(self.icon)
-                .variant(ButtonVariant::Ghost)
-                .size(ComponentSize::Xs),
-        );
+        let mut button = FunctoraButton::icon_only(self.icon)
+            .variant(self.variant)
+            .size(ComponentSize::Xs);
+        if let Some(width) = self.width {
+            button = button.fixed_width(width);
+        }
+        let response = ui.add(button);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &self.label)
         });
@@ -213,6 +276,8 @@ pub(crate) fn icon_button(text: impl AsRef<str>, name: &str) -> IconButton {
         "info" => LucideIcon::Info,
         "settings" => LucideIcon::Settings,
         "logs" => LucideIcon::Logs,
+        "theme" => LucideIcon::SunMoon,
+        "updates" => LucideIcon::RefreshCw,
         "chevron-down" => LucideIcon::ChevronDown,
         _ => panic!("unknown application icon: {name}"),
     };
@@ -220,6 +285,8 @@ pub(crate) fn icon_button(text: impl AsRef<str>, name: &str) -> IconButton {
         label: action_label(text.as_ref()),
         icon,
         has_popup: false,
+        variant: ButtonVariant::Ghost,
+        width: None,
     }
 }
 
@@ -236,8 +303,16 @@ pub(crate) fn checkbox(
     response
 }
 
+/// Compact desktop field; functora's Input has no size override below 800pt.
 pub(crate) fn input(ui: &mut egui::Ui, value: &mut String) -> egui::Response {
-    ui.add(Input::new(value).desired_width(ui.available_width()))
+    let padding = egui::vec2(8.0, 5.0);
+    let width = (ui.available_width() - padding.x * 2.0).max(1.0);
+    ui.add(
+        egui::TextEdit::singleline(value)
+            .font(egui::FontId::proportional(14.0))
+            .margin(padding)
+            .desired_width(width),
+    )
 }
 
 pub(crate) fn select(
@@ -248,16 +323,31 @@ pub(crate) fn select(
     placeholder: &str,
 ) -> egui::Response {
     let before = *value;
-    let entries: Vec<_> = choices.iter().cloned().enumerate().collect();
     let mut selected = choices.get(*value).map(|_| *value);
+    let shown = choices
+        .get(*value)
+        .map(String::as_str)
+        .unwrap_or(placeholder);
+    // Functora 0.2 fixes narrow-view fields to 44pt without a size builder.
+    // Keep native field behavior and use the same palette at desktop density.
     let mut response = ui
-        .push_id(id, |ui| {
-            ui.add_enabled(
-                !entries.is_empty(),
-                SelectLabeled::new(&mut selected, &entries)
-                    .width(ui.available_width())
-                    .placeholder(placeholder),
-            )
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.y = 28.0;
+            ui.spacing_mut().button_padding = egui::vec2(8.0, 4.0);
+            ui.add_enabled_ui(!choices.is_empty(), |ui| {
+                egui::ComboBox::from_id_salt(id)
+                    .width((ui.available_width() - ui.spacing().button_padding.x * 2.0).max(1.0))
+                    .height(240.0)
+                    .truncate()
+                    .selected_text(shown)
+                    .show_ui(ui, |ui| {
+                        for (i, text) in choices.iter().enumerate() {
+                            ui.selectable_value(&mut selected, Some(i), text);
+                        }
+                    })
+                    .response
+            })
+            .inner
         })
         .inner;
     // Upstream paints the select but does not publish metadata or mark changes.
@@ -416,7 +506,16 @@ fn script_fonts() -> egui::FontDefinitions {
 pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(title).size(18.0).strong());
+        let heading = egui::FontFamily::Name("Inter Heading".into());
+        let family = if ui
+            .ctx()
+            .fonts(|f| f.definitions().families.contains_key(&heading))
+        {
+            heading
+        } else {
+            egui::FontFamily::Proportional
+        };
+        ui.label(RichText::new(title).font(egui::FontId::new(18.0, family)));
         separator(ui);
     });
 }

@@ -65,7 +65,6 @@ enum Dialog {
     Confirm,
     Hash(Option<[String; 4]>, f32),
     Fido(FidoState),
-    UpdatePolicy,
     NewVersion(Release),
     Error(String),
 }
@@ -142,7 +141,6 @@ struct App {
     dialog: Dialog,
     show_log: bool,
     show_about: bool,
-    show_settings: bool,
     theme_preference: egui::ThemePreference,
     log: Vec<String>,
 
@@ -150,7 +148,7 @@ struct App {
     update_rx: Option<Receiver<Result<Option<Release>, String>>>,
     /// Started with "Check Now": a newer release always gets its dialog.
     update_manual: bool,
-    /// Outcome of the last check, shown in the settings window.
+    /// Outcome of the last check, shown in the toolbar popover.
     update_note: String,
 
     busy: Option<(Receiver<Msg>, Arc<AtomicBool>)>,
@@ -260,14 +258,9 @@ impl App {
             edition: 0,
             download_mode: false,
             pending_image: None,
-            dialog: if saved_policy.is_some() {
-                Dialog::None
-            } else {
-                Dialog::UpdatePolicy
-            },
+            dialog: Dialog::None,
             show_log: false,
             show_about: false,
-            show_settings: false,
             theme_preference: egui::ThemePreference::System,
             log: vec![format!("Rustfus {}", env!("CARGO_PKG_VERSION"))],
             update: saved_policy.clone().unwrap_or_default(),
@@ -942,7 +935,8 @@ mod tests {
                 for label in [
                     t("MSG_273"),
                     t("MSG_302"),
-                    t("MSG_301"),
+                    "Theme".into(),
+                    "Check for updates".into(),
                     t("MSG_303"),
                     action.clone(),
                     action_text("IDCANCEL"),
@@ -990,9 +984,9 @@ mod tests {
                 fonts.definitions().families[&egui::FontFamily::Proportional]
                     .first()
                     .map(String::as_str),
-                Some("Inter")
+                Some("Inter Variable")
             );
-            assert!(fonts.definitions().font_data.contains_key("Inter"));
+            assert!(fonts.definitions().font_data.contains_key("Inter Variable"));
         });
     }
 
