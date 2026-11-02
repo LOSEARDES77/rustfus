@@ -237,6 +237,11 @@ impl App {
         let saved_policy = update::Settings::load();
         let scan_rx = spawn_scanner(cc.egui_ctx.clone(), list_all.clone(), rescan.clone());
         let mut app = Self::with_inputs(scan_rx, list_all, rescan, saved_policy.clone());
+        #[cfg(target_os = "macos")]
+        if let Err(error) = crate::about::install_menu_handler() {
+            app.log
+                .push(format!("Could not configure the About menu: {error}"));
+        }
         if saved_policy.is_some_and(|s| s.is_due(update::now())) {
             app.check_updates(&cc.egui_ctx, /* manual= */ false);
         }
