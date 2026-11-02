@@ -28,6 +28,7 @@ use to_go::write_wtg;
 
 pub enum Msg {
     Progress(f32, String),
+    CurrentFile(String),
     Log(String),
     Done(Result<String, String>),
 }

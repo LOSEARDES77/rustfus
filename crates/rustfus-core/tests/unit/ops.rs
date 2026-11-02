@@ -436,7 +436,8 @@ fn iso_mode_to_fat32_image() {
         serial: None,
     };
     let job = test_job(drive, iso_path);
-    let (tx, cancel) = ctx_parts();
+    let (tx, rx) = std::sync::mpsc::channel();
+    let cancel = AtomicBool::new(false);
     let ctx = Ctx {
         tx: &tx,
         cancel: &cancel,
@@ -449,6 +450,10 @@ fn iso_mode_to_fat32_image() {
         .unwrap();
     write_tables(&job, &rep, None, &parts, &dev, &ctx).unwrap();
     write_fat(&job, &rep, Some(&iso), None, &parts[0], &dev, &ctx).unwrap();
+
+    assert!(rx.try_iter().any(|msg| matches!(msg,
+        Msg::CurrentFile(ref path) if path.starts_with("sources/install.wim (")
+    )));
 
     let raw = std::fs::read(&devp).unwrap();
     assert_eq!(&raw[510..512], &[0x55, 0xaa]);

@@ -157,6 +157,7 @@ where
     for msg in rx {
         match msg {
             Msg::Progress(_, s) => progress(&s),
+            Msg::CurrentFile(s) => progress(&s),
             Msg::Log(s) => eprintln!("\r{s:70}"),
             Msg::Done(r) => {
                 eprint!("\r{:70}\r", "");

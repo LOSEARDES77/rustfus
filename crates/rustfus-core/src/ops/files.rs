@@ -183,6 +183,12 @@ pub(super) fn copy_files<T: fatfs::ReadWriteSeek>(
                 reader = Box::new(iso.reader(entry).map_err(e)?);
             }
         }
+        ctx.tx
+            .send(super::Msg::CurrentFile(format!(
+                "{path} ({})",
+                crate::drives::human(entry.size)
+            )))
+            .ok();
         let mut out = dest.create(&path).map_err(|err| format!("{path}: {err}"))?;
         let mut md5 = Md5::new();
         loop {

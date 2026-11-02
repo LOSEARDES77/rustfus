@@ -7,19 +7,18 @@ use std::{path::PathBuf, sync::atomic::Ordering};
 use crate::assets::icon;
 use crate::model::{BootSel, Dialog, Model};
 use gpui_kit::component::{
-    Disableable, IndexPath, Sizable, ThemeMode, WindowExt,
+    ActiveTheme, Disableable, IndexPath, Sizable, ThemeMode, WindowExt,
     button::{Button, ButtonGroup, ButtonVariants},
     checkbox::Checkbox,
     input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
-    progress::Progress,
     select::{SearchableVec, Select, SelectEvent, SelectState},
     slider::{Slider, SliderEvent, SliderState},
 };
 use gpui_kit::{
     AnyWindowHandle, App, AppContext, Context, Entity, ExternalPaths, Focusable, IntoElement,
     ParentElement, PathPromptOptions, Render, SharedString, Styled, Subscription, Task, Window,
-    div, prelude::*, px, rgb,
+    div, prelude::*, px, relative, rgb,
 };
 use rustfus_core::{
     image,
@@ -479,6 +478,11 @@ impl RustfusView {
     }
 
     fn select(&self, field: usize, label: String, disabled: bool) -> impl IntoElement {
+        let leading_icon = match field {
+            DEVICE => Some("hard-drive"),
+            BOOT => Some("file-image"),
+            _ => None,
+        };
         div()
             .flex()
             .flex_col()
@@ -487,10 +491,29 @@ impl RustfusView {
             .gap_2()
             .child(label.clone())
             .child(
-                Select::new(&self.controls[field].state)
+                div()
+                    .relative()
                     .w_full()
-                    .accessibility_label(label)
-                    .disabled(disabled),
+                    .child(
+                        Select::new(&self.controls[field].state)
+                            .w_full()
+                            .when(leading_icon.is_some(), |this| this.pl_8())
+                            .accessibility_label(label)
+                            .disabled(disabled),
+                    )
+                    .when_some(leading_icon, |this, name| {
+                        this.child(
+                            div()
+                                .absolute()
+                                .left_2()
+                                .top_0()
+                                .h_8()
+                                .flex()
+                                .items_center()
+                                .when(disabled, |this| this.opacity(0.5))
+                                .child(icon(name).small()),
+                        )
+                    }),
             )
     }
 
@@ -525,7 +548,6 @@ impl Render for RustfusView {
         let source_weak = weak.clone();
         let source_mode = m.download_mode;
         let source = Button::new("image-source")
-            .small()
             .icon(icon("chevron-down"))
             .accessibility_label("Image source")
             .tooltip("Image source")
@@ -557,6 +579,8 @@ impl Render for RustfusView {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
+            // Kit's 3px outer focus ring needs room inside the scroll clip.
+            .p(px(4.))
             .gap_3()
             .child(
                 div()
@@ -571,7 +595,6 @@ impl Render for RustfusView {
                     .child(self.select(DEVICE, t("IDS_DEVICE_TXT"), busy || !m.scan_ready()))
                     .child(
                         Button::new("retry")
-                            .small()
                             .icon(icon("refresh-cw"))
                             .tooltip(
                                 m.scan_error
@@ -587,7 +610,6 @@ impl Render for RustfusView {
                     )
                     .child(
                         Button::new("save-drive")
-                            .small()
                             .icon(icon("hard-drive"))
                             .tooltip(t("MSG_304"))
                             .accessibility_label(t("MSG_304"))
@@ -607,7 +629,6 @@ impl Render for RustfusView {
                     .child(self.select(BOOT, t("IDS_BOOT_SELECTION_TXT"), busy))
                     .child(
                         Button::new("hash")
-                            .small()
                             .icon(icon("file-image"))
                             .tooltip(t("MSG_314"))
                             .accessibility_label(t("MSG_314"))
@@ -622,9 +643,8 @@ impl Render for RustfusView {
                             .flex()
                             .gap_0()
                             .child(
-                                ButtonGroup::new("image-action-group").small().child(
+                                ButtonGroup::new("image-action-group").child(
                                     Button::new("select-image")
-                                        .small()
                                         .label(action_label(&t(if m.download_mode {
                                             "MSG_040"
                                         } else {
@@ -957,18 +977,12 @@ impl Render for RustfusView {
                     .disabled(busy)
                     .on_click(|_, w, _| w.remove_window()),
             );
-        let status = if busy {
-            m.status.clone()
-        } else if m.scanning {
-            "Scanning for devices…".into()
-        } else if m.scan_error.is_some() {
-            "Device scan failed".into()
-        } else if let Some(done) = m.done {
-            if done { "Done".into() } else { t("MSG_212") }
-        } else if m.drives.is_empty() {
-            "No devices found".into()
+        let status = m.progress_label();
+        let progress_value = m.progress_value();
+        let bar_color = if cx.theme().is_dark() {
+            rgb(0x236b1d)
         } else {
-            t("MSG_210")
+            rgb(0x4caf3b)
         };
         let seconds = m
             .started
@@ -993,35 +1007,61 @@ impl Render for RustfusView {
                             .child(t("IDS_STATUS_TXT")),
                     )
                     .child(
-                        Progress::new("job-progress")
-                            .value(if m.done == Some(true) {
-                                100.
-                            } else {
-                                m.progress * 100.
-                            })
-                            .accessibility_label(status.clone()),
-                    )
-                    .child(status),
+                        gpui_kit::base::Progress::new("job-progress")
+                            .value(progress_value)
+                            .accessibility_label(status.clone())
+                            .relative()
+                            .h(px(28.))
+                            .w_full()
+                            .flex_shrink_0()
+                            .overflow_hidden()
+                            .rounded(px(4.))
+                            .border_1()
+                            .border_color(cx.theme().border)
+                            .bg(cx.theme().muted)
+                            .child(
+                                gpui_kit::base::ProgressIndicator::new()
+                                    .absolute()
+                                    .top_0()
+                                    .bottom_0()
+                                    .left_0()
+                                    .w(relative(progress_value / 100.))
+                                    .bg(bar_color),
+                            )
+                            .child(
+                                div()
+                                    .relative()
+                                    .size_full()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .text_sm()
+                                    .text_color(cx.theme().foreground)
+                                    .px_2()
+                                    .overflow_hidden()
+                                    .child(status),
+                            ),
+                    ),
             );
-        if m.drives.is_empty() && !m.scanning && m.scan_error.is_none() {
-            view = view.child(
-                div()
-                    .text_sm()
-                    .child("Connect a USB drive, then refresh devices."),
-            );
-        }
         view = view.child(footer).child(
             div()
                 .flex()
-                .justify_between()
+                .items_center()
+                .gap_2()
                 .text_sm()
-                .child(format!("{} device(s)", m.drives.len()))
-                .child(format!(
+                .child(div().flex_1().min_w_0().truncate().child(
+                    if busy && !m.current_file.is_empty() {
+                        m.current_file.clone()
+                    } else {
+                        format!("{} device(s)", m.drives.len())
+                    },
+                ))
+                .child(div().flex_shrink_0().child(format!(
                     "{:02}:{:02}:{:02}",
                     seconds / 3600,
                     seconds / 60 % 60,
                     seconds % 60
-                )),
+                ))),
         );
         if m.show_log {
             view = view

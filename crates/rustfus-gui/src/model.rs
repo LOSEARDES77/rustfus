@@ -157,6 +157,7 @@ pub(crate) struct Model {
     pub(crate) hash_rx: Option<Receiver<(f32, Option<[String; 4]>)>>,
     pub(crate) progress: f32,
     pub(crate) status: String,
+    pub(crate) current_file: String,
     /// Outcome of the last job, shown until the next device scan.
     pub(crate) done: Option<bool>,
     pub(crate) started: Option<Instant>,
@@ -164,6 +165,40 @@ pub(crate) struct Model {
 }
 
 impl Model {
+    pub(crate) fn progress_label(&self) -> String {
+        if self.busy.is_some() {
+            if self.status.is_empty() {
+                "Starting…".into()
+            } else {
+                self.status.clone()
+            }
+        } else if let Some(done) = self.done {
+            if done { t("MSG_210") } else { t("MSG_212") }
+        } else if self.scanning {
+            "Scanning for devices…".into()
+        } else if self.scan_error.is_some() {
+            "Device scan failed".into()
+        } else if self.drives.is_empty() {
+            "No devices found".into()
+        } else {
+            t("MSG_210")
+        }
+    }
+
+    pub(crate) fn progress_value(&self) -> f32 {
+        if self.busy.is_some() {
+            if self.progress.is_finite() {
+                self.progress.clamp(0., 1.) * 100.
+            } else {
+                0.
+            }
+        } else if self.done == Some(true) {
+            100.
+        } else {
+            0.
+        }
+    }
+
     pub(crate) fn can_start(&self) -> bool {
         self.scan_ready()
             && self.busy.is_none()
@@ -332,6 +367,7 @@ impl Model {
             hash_rx: None,
             progress: 0.0,
             status: String::new(),
+            current_file: String::new(),
             done: None,
             started: None,
             elapsed: Duration::ZERO,
@@ -354,9 +390,12 @@ impl Model {
     pub(crate) fn set_drives(&mut self, d: Vec<Drive>) {
         let keep = self.drive().map(|d| d.path.clone());
         self.selected = keep
-            .and_then(|p| d.iter().position(|x| x.path == p))
+            .as_ref()
+            .and_then(|p| d.iter().position(|x| &x.path == p))
             .or((!d.is_empty()).then_some(0));
-        self.done = None;
+        if self.drive() != self.selected.and_then(|i| d.get(i)) {
+            self.done = None;
+        }
         self.drives = d;
         if !self.image_mode() && self.label.is_empty() {
             self.label = self.drive().map(|d| d.name.clone()).unwrap_or_default();
@@ -475,6 +514,7 @@ impl Model {
         self.progress = 0.0;
         self.done = None;
         self.status.clear();
+        self.current_file.clear();
     }
 
     pub(crate) fn start_job(&mut self) {
@@ -615,6 +655,7 @@ impl Model {
         while let Ok(msg) = rx.try_recv() {
             match msg {
                 Msg::Progress(p, s) => (self.progress, self.status) = (p, s),
+                Msg::CurrentFile(s) => self.current_file = s,
                 Msg::Log(s) => self.log.push(s),
                 Msg::Done(r) => {
                     self.busy = None;
@@ -873,6 +914,66 @@ mod tests {
         model.drives[0].serial = Some("replacement-device".into());
         model.start_job();
         assert!(model.busy.is_none());
+    }
+
+    #[test]
+    fn progress_bar_tracks_idle_writing_completion_and_failure() {
+        let (mut model, scan) = fixture();
+        scan.send(Ok(vec![])).unwrap();
+        model.poll();
+        assert_eq!(model.progress_label(), "No devices found");
+        assert_eq!(model.progress_value(), 0.);
+
+        scan.send(Ok(vec![drive()])).unwrap();
+        model.poll();
+        assert_eq!(model.progress_label(), t("MSG_210"));
+        assert_eq!(model.progress_value(), 0.);
+
+        let (tx, rx) = channel();
+        model.busy = Some((rx, Arc::new(AtomicBool::new(false))));
+        assert_eq!(model.progress_label(), "Starting…");
+        tx.send(Msg::CurrentFile("sources/install.wim (4.4 GB)".into()))
+            .unwrap();
+        tx.send(Msg::Progress(0.86, "Copying ISO files: 86.0%".into()))
+            .unwrap();
+        model.poll();
+        assert_eq!(model.current_file, "sources/install.wim (4.4 GB)");
+        assert_eq!(model.progress_label(), "Copying ISO files: 86.0%");
+        assert_eq!(model.progress_value(), 86.);
+
+        tx.send(Msg::Done(Ok("Finished".into()))).unwrap();
+        model.poll();
+        assert_eq!(model.progress_label(), t("MSG_210"));
+        assert_eq!(model.progress_value(), 100.);
+        scan.send(Ok(vec![drive()])).unwrap();
+        model.poll();
+        assert_eq!(model.progress_value(), 100.);
+
+        let (tx, rx) = channel();
+        model.busy = Some((rx, Arc::new(AtomicBool::new(false))));
+        tx.send(Msg::Done(Err("Synthetic failure".into()))).unwrap();
+        model.poll();
+        assert_eq!(model.progress_label(), t("MSG_212"));
+        assert_eq!(model.progress_value(), 0.);
+    }
+
+    #[test]
+    fn progress_clamps_invalid_values_and_resets_on_drive_change() {
+        let (mut model, _scan) = fixture();
+        let (_tx, rx) = channel();
+        model.busy = Some((rx, Arc::new(AtomicBool::new(false))));
+        for (value, expected) in [(f32::NAN, 0.), (f32::INFINITY, 0.), (-0.5, 0.), (2., 100.)] {
+            model.progress = value;
+            assert_eq!(model.progress_value(), expected);
+        }
+        model.busy = None;
+        model.set_drives(vec![drive()]);
+        model.done = Some(true);
+        let mut replacement = drive();
+        replacement.serial = Some("replacement".into());
+        model.set_drives(vec![replacement]);
+        assert_eq!(model.done, None);
+        assert_eq!(model.progress_value(), 0.);
     }
 
     #[test]
