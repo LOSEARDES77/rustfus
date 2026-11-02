@@ -106,7 +106,7 @@ Download from the [Releases](../../releases) page:
 | System | File | Notes |
 |---|---|---|
 | Windows (x86_64 / ARM64) | `Rustfus-<version>-windows-<arch>.exe` | Portable, asks for Administrator rights (UAC) at launch |
-| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Run with `sudo /Applications/Rustfus.app/Contents/MacOS/rustfus` |
+| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Rustfus asks for administrator authorization when a disk write starts. |
 | Debian, Ubuntu, Mint… | `rustfus_<version>-1_<arch>.deb` | `sudo apt install ./rustfus_*.deb` |
 | Fedora, openSUSE, RHEL… | `rustfus-<version>-1.<arch>.rpm` | `sudo dnf install ./rustfus-*.rpm` |
 | Arch, Manjaro, CachyOS… | `rustfus-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U rustfus-*.pkg.tar.zst` |

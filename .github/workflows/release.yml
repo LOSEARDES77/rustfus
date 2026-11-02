@@ -104,6 +104,7 @@ jobs:
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
+            <key>NSRemovableVolumesUsageDescription</key><string>Rustfus needs access to removable volumes to create bootable media.</string>
           </dict></plist>
           EOF
           python3 packaging/macos-icons.py "$app" --mode required

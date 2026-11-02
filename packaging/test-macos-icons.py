@@ -59,6 +59,10 @@ partial.write_bytes(plistlib.dumps({{"CFBundleIconName": "rustfus", "CFBundleIco
         self.assertEqual((self.resources / "rustfus.icns").read_bytes(), icons.FALLBACK.read_bytes())
         info = plistlib.loads(self.info.read_bytes())
         self.assertEqual(info["CFBundleIconFile"], "rustfus.icns")
+        self.assertEqual(
+            info["NSRemovableVolumesUsageDescription"],
+            "Rustfus needs access to removable volumes to create bootable media.",
+        )
         for key in ("CFBundleIdentifier", "CFBundleVersion", "LSMinimumSystemVersion", "NSHighResolutionCapable"):
             self.assertEqual(info[key], self.original[key])
         return info

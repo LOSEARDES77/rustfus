@@ -74,6 +74,9 @@ def install(app, mode="auto", actool=None):
             info.pop(key, None)
         info.update(compiled_info)
         info["CFBundleIconFile"] = "rustfus.icns"
+        info["NSRemovableVolumesUsageDescription"] = (
+            "Rustfus needs access to removable volumes to create bootable media."
+        )
         with info_path.open("wb") as stream:
             plistlib.dump(info, stream, sort_keys=False)
 
