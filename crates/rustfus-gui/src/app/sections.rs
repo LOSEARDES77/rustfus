@@ -6,13 +6,13 @@
 use super::{App, BootSel, Dialog, FidoState, MB};
 use crate::widgets::{
     bad_block_mode, button, checkbox, cluster_name, combo, icon_button, input, progress, section,
-    select, separator, toggle,
+    select, toggle,
 };
 use eframe::egui;
+use functora_egui::{Button, ButtonVariant, ComponentSize, Popover, Slider};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Fs, Scheme, Target};
 use rustfus_core::{image, loc, ops};
-use shadcn_egui::components::{button::ButtonVariant, popover::Popover, slider::Slider};
 use std::sync::atomic::Ordering;
 
 const PERSISTENCE_STEP_MB: u64 = 256;
@@ -97,7 +97,8 @@ impl App {
                 None => tf("MSG_281", &[&t("MSG_280")]),
             };
             let before = self.boot;
-            let w = (ui.available_width() - 36.0 - ui.spacing().item_spacing.x).max(1.0);
+            let w = (ui.available_width() - 28.0 * 2.0 - 90.0 - ui.spacing().item_spacing.x * 3.0)
+                .max(1.0);
             ui.allocate_ui(egui::vec2(w, ui.spacing().interact_size.y), |ui| {
                 ui.set_max_width(w);
                 let choices = vec![name, "FreeDOS".into(), t("MSG_279")];
@@ -136,8 +137,6 @@ impl App {
             if hash.on_hover_text(t("MSG_314")).clicked() {
                 self.compute_hashes(ui.ctx());
             }
-        });
-        ui.horizontal_wrapped(|ui| {
             // Rufus' split button: SELECT, or DOWNLOAD (Fido) from the arrow menu.
             ui.add_enabled_ui(self.boot == BootSel::Image, |ui| {
                 let (select_text, download) = (t("IDC_SELECT"), t("MSG_040"));
@@ -146,9 +145,9 @@ impl App {
                 } else {
                     &select_text
                 };
-                let main = ui.add(button(text));
+                let main = ui.add(button(text).fixed_width(90.0));
                 let menu = ui.add(icon_button("Image source", "chevron-down").has_popup(true));
-                Popover::new(&menu).show(|ui| {
+                Popover::new().show(ui, &menu, |ui| {
                     if ui.add(button(&select_text)).clicked() {
                         self.download_mode = false;
                         egui::Popup::close_all(ui.ctx());
@@ -203,7 +202,7 @@ impl App {
             }
         }
         if self.iso_mode() && self.report.persistence_capable() {
-            ui.label(t("MSG_123"));
+            let persistence_label = ui.label(t("MSG_123"));
             let max = self
                 .drive()
                 .map(|d| {
@@ -219,12 +218,11 @@ impl App {
             };
             let mut slot = persistence_slots(self.persistence_mb) as f32;
             if ui
-                .add(
-                    Slider::new(&mut slot, 0.0..=persistence_slots(max) as f32)
-                        .step(1.0)
-                        .enabled(max > 0)
-                        .label(t("MSG_123")),
+                .add_enabled(
+                    max > 0,
+                    Slider::f32(&mut slot, 0.0..=persistence_slots(max) as f32).step(1.0),
                 )
+                .labelled_by(persistence_label.id)
                 .changed()
             {
                 self.persistence_mb = persistence_mb_from_slot(slot, max);
@@ -384,35 +382,35 @@ impl App {
             (0.0, t("MSG_210"))
         };
         progress(ui, fraction, status);
-        ui.add_space(10.0);
-        ui.horizontal_wrapped(|ui| {
-            let languages = loc::languages();
-            let labels: Vec<String> = languages.iter().map(|l| l.name.clone()).collect();
-            let mut current = languages
-                .iter()
-                .position(|l| l.code == loc::current())
-                .unwrap_or(usize::MAX);
+    }
+
+    pub(super) fn footer(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
             let lang = ui
-                .add(icon_button(t("MSG_273"), "languages"))
+                .add(icon_button(t("MSG_273"), "languages").has_popup(true))
                 .on_hover_text(t("MSG_273"));
-            let language_label = ui.label(t("MSG_273"));
-            let width = ui.available_width();
-            ui.allocate_ui(egui::vec2(width, 32.0), |ui| {
-                ui.set_width(width);
-                let response = select(ui, "language", &mut current, &labels, &t("MSG_273"))
-                    .labelled_by(language_label.id);
-                if lang.clicked() {
-                    response.request_focus();
-                    egui::Popup::open_id(ui.ctx(), egui::Popup::default_response_id(&response));
-                }
-                if response.changed()
-                    && let Some(language) = languages.get(current)
-                {
-                    loc::set_language(&language.code);
-                }
+            Popover::new().show(ui, &lang, |ui| {
+                egui::ScrollArea::vertical()
+                    .max_height(280.0)
+                    .show(ui, |ui| {
+                        for language in loc::languages() {
+                            // Language names are data, not action labels: preserve their casing.
+                            if ui
+                                .add(
+                                    Button::new(&language.name)
+                                        .variant(ButtonVariant::Ghost)
+                                        .size(ComponentSize::Sm)
+                                        .selected(language.code == loc::current())
+                                        .full_width(),
+                                )
+                                .clicked()
+                            {
+                                loc::set_language(&language.code);
+                                egui::Popup::close_all(ui.ctx());
+                            }
+                        }
+                    });
             });
-        });
-        ui.horizontal_wrapped(|ui| {
             if ui
                 .add(icon_button(t("MSG_302"), "info"))
                 .on_hover_text(t("MSG_302"))
@@ -434,30 +432,35 @@ impl App {
             {
                 self.show_log = !self.show_log;
             }
-        });
-        separator(ui);
-        ui.horizontal_wrapped(|ui| {
-            let ready = self.busy.is_none()
-                && self.scan_ready()
-                && self.drive().is_some()
-                && (self.boot != BootSel::Image || self.image.is_some());
-            if ui
-                .add_enabled(
-                    ready,
-                    button(t("IDC_START")).variant(ButtonVariant::Default),
-                )
-                .on_hover_text(t("MSG_171"))
-                .clicked()
-            {
-                self.on_start();
-            }
-            if let Some((_, cancel)) = &self.busy {
-                if ui.add(button(t("MSG_007"))).clicked() {
-                    cancel.store(true, Ordering::Relaxed);
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add_enabled(self.busy.is_none(), button(t("IDCANCEL")).fixed_width(80.0))
+                    .clicked()
+                {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
                 }
-            } else if ui.add(button(t("IDCANCEL"))).clicked() {
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-            }
+                if let Some((_, cancel)) = &self.busy {
+                    if ui.add(button(t("MSG_007")).fixed_width(80.0)).clicked() {
+                        cancel.store(true, Ordering::Relaxed);
+                    }
+                } else {
+                    let ready = self.scan_ready()
+                        && self.drive().is_some()
+                        && (self.boot != BootSel::Image || self.image.is_some());
+                    if ui
+                        .add_enabled(
+                            ready,
+                            button(t("IDC_START"))
+                                .variant(ButtonVariant::Default)
+                                .fixed_width(80.0),
+                        )
+                        .on_hover_text(t("MSG_171"))
+                        .clicked()
+                    {
+                        self.on_start();
+                    }
+                }
+            });
         });
     }
 }

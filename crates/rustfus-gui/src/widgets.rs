@@ -5,8 +5,8 @@
 
 use eframe::egui::{self, Color32, RichText};
 use functora_egui::{
-    Button, ButtonVariant, Checkbox, ComponentSize, Dialog, Input, LucideIcon, Progress,
-    SelectLabeled, Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
+    Button as FunctoraButton, ButtonVariant, Checkbox, ComponentSize, Dialog, Input, LucideIcon,
+    Progress, SelectLabeled, Separator, ShadcnTheme, ShadcnThemeExt, Spinner,
 };
 use rustfus_core::image;
 use rustfus_core::loc::{t, tf};
@@ -20,9 +20,40 @@ fn rufus_theme(dark: bool) -> ShadcnTheme {
         functora_egui::theme::shadcn_theme_light::light()
     };
     theme.radius = 4.0;
-    // Keep action controls neutral; green is reserved for the status indicator.
-    theme.primary = theme.foreground;
-    theme.primary_foreground = theme.background;
+    let gray = Color32::from_gray;
+    if dark {
+        theme.background = gray(24);
+        theme.foreground = gray(244);
+        theme.card = gray(24);
+        theme.popover = gray(28);
+        theme.primary = gray(244);
+        theme.primary_foreground = gray(24);
+        theme.secondary = gray(39);
+        theme.muted = gray(39);
+        theme.muted_foreground = gray(163);
+        theme.accent = gray(48);
+        theme.border = gray(58);
+        theme.input = gray(70);
+        theme.ring = gray(163);
+    } else {
+        theme.background = Color32::WHITE;
+        theme.foreground = gray(24);
+        theme.card = Color32::WHITE;
+        theme.popover = Color32::WHITE;
+        theme.primary = gray(24);
+        theme.primary_foreground = gray(250);
+        theme.secondary = gray(245);
+        theme.muted = gray(245);
+        theme.muted_foreground = gray(100);
+        theme.accent = gray(240);
+        theme.border = gray(228);
+        theme.input = gray(212);
+        theme.ring = gray(115);
+    }
+    theme.card_foreground = theme.foreground;
+    theme.popover_foreground = theme.foreground;
+    theme.secondary_foreground = theme.foreground;
+    theme.accent_foreground = theme.foreground;
     theme
 }
 
@@ -31,26 +62,38 @@ pub(crate) fn rufus_style(ctx: &egui::Context, dark: bool) {
     let installed = egui::Id::new("rustfus-theme-installed");
     let previous = ctx.data(|d| d.get_temp::<bool>(installed));
     if previous.is_none() {
-        functora_egui::setup_fonts(ctx);
+        let mut fonts = egui::FontDefinitions::default();
+        fonts.font_data.insert(
+            "Inter".into(),
+            std::sync::Arc::new(egui::FontData::from_static(include_bytes!(
+                "../../../res/fonts/inter.ttf"
+            ))),
+        );
+        fonts
+            .families
+            .entry(egui::FontFamily::Proportional)
+            .or_default()
+            .insert(0, "Inter".into());
         for (name, data) in script_fonts().font_data {
-            ctx.add_font(egui::epaint::text::FontInsert::new(
-                &name,
-                (*data).clone(),
-                [egui::FontFamily::Proportional, egui::FontFamily::Monospace]
-                    .into_iter()
-                    .map(|family| egui::epaint::text::InsertFontFamily {
-                        family,
-                        priority: egui::epaint::text::FontPriority::Lowest,
-                    })
-                    .collect(),
-            ));
+            fonts.font_data.insert(name.clone(), data);
+            for family in fonts.families.values_mut() {
+                family.push(name.clone());
+            }
         }
+        ctx.set_fonts(fonts);
         ctx.all_styles_mut(|s| {
             s.spacing.item_spacing.y = 6.0;
             s.spacing.window_margin = egui::Margin::same(12);
         });
     }
     if previous != Some(dark) {
+        ctx.all_styles_mut(|s| {
+            s.visuals = if dark {
+                egui::Visuals::dark()
+            } else {
+                egui::Visuals::light()
+            };
+        });
         ctx.set_shadcn_theme(rufus_theme(dark));
         ctx.data_mut(|d| d.insert_temp(installed, dark));
     }
@@ -82,10 +125,52 @@ fn action_label(text: &str) -> String {
         .collect()
 }
 
-pub(crate) fn button(text: impl AsRef<str>) -> Button<'static> {
-    Button::new(action_label(text.as_ref()))
-        .variant(ButtonVariant::Outline)
-        .size(ComponentSize::Sm)
+pub(crate) struct Button {
+    label: String,
+    inner: FunctoraButton<'static>,
+}
+
+impl Button {
+    pub(crate) fn variant(mut self, variant: ButtonVariant) -> Self {
+        self.inner = self.inner.variant(variant);
+        self
+    }
+    pub(crate) fn fixed_width(mut self, width: f32) -> Self {
+        self.inner = self.inner.fixed_width(width);
+        self
+    }
+    fn icon(mut self, icon: LucideIcon) -> Self {
+        self.inner = self.inner.icon(icon);
+        self
+    }
+    fn selected(mut self, selected: bool) -> Self {
+        self.inner = self.inner.selected(selected);
+        self
+    }
+}
+
+impl egui::Widget for Button {
+    fn ui(self, ui: &mut egui::Ui) -> egui::Response {
+        let response = ui.add(self.inner);
+        response.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::WidgetType::Button,
+                response.enabled(),
+                self.label.clone(),
+            )
+        });
+        response
+    }
+}
+
+pub(crate) fn button(text: impl AsRef<str>) -> Button {
+    let label = action_label(text.as_ref());
+    Button {
+        inner: FunctoraButton::new(label.clone())
+            .variant(ButtonVariant::Outline)
+            .size(ComponentSize::Xs),
+        label,
+    }
 }
 
 pub(crate) struct IconButton {
@@ -104,9 +189,9 @@ impl IconButton {
 impl egui::Widget for IconButton {
     fn ui(self, ui: &mut egui::Ui) -> egui::Response {
         let response = ui.add(
-            Button::icon_only(self.icon)
+            FunctoraButton::icon_only(self.icon)
                 .variant(ButtonVariant::Ghost)
-                .size(ComponentSize::Sm),
+                .size(ComponentSize::Xs),
         );
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Button, ui.is_enabled(), &self.label)

@@ -6,8 +6,9 @@
 mod dialogs;
 mod sections;
 
-use crate::widgets::rufus_style;
+use crate::widgets::sync_style;
 use eframe::egui::{self};
+use functora_egui::ShadcnThemeExt;
 use rustfus_core::drives::Drive;
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{Boot, Fs, Job, Msg, Report, Scheme, Target};
@@ -142,7 +143,7 @@ struct App {
     show_log: bool,
     show_about: bool,
     show_settings: bool,
-    dark: bool,
+    theme_preference: egui::ThemePreference,
     log: Vec<String>,
 
     update: update::Settings,
@@ -160,7 +161,6 @@ struct App {
     done: Option<bool>,
     started: Option<Instant>,
     elapsed: Duration,
-    height: f32,
 }
 
 /// Background drive scan every 2 s so plugging a stick updates the list.
@@ -195,7 +195,8 @@ fn spawn_scanner(
 
 impl App {
     fn new(cc: &eframe::CreationContext) -> Self {
-        rufus_style(&cc.egui_ctx, false);
+        cc.egui_ctx.set_theme(egui::ThemePreference::System);
+        sync_style(&cc.egui_ctx);
         loc::set_language(&loc::default_for_system());
         let list_all = Arc::new(AtomicBool::new(false));
         let rescan = Arc::new(AtomicBool::new(false));
@@ -267,7 +268,7 @@ impl App {
             show_log: false,
             show_about: false,
             show_settings: false,
-            dark: false,
+            theme_preference: egui::ThemePreference::System,
             log: vec![format!("Rustfus {}", env!("CARGO_PKG_VERSION"))],
             update: saved_policy.clone().unwrap_or_default(),
             update_rx: None,
@@ -280,7 +281,6 @@ impl App {
             done: None,
             started: None,
             elapsed: Duration::ZERO,
-            height: 0.0,
         }
     }
 
@@ -627,6 +627,7 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll();
         let ctx = ui.ctx().clone();
+        sync_style(&ctx);
         if self.busy.is_some() {
             ctx.request_repaint_after(Duration::from_millis(200));
         }
@@ -642,74 +643,60 @@ impl eframe::App for App {
             self.select_image(p);
         }
 
-        egui::Panel::bottom("statusbar").show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let status = match (self.busy.is_some(), self.done) {
-                    (true, _) => self.status.clone(),
-                    (false, _) if self.scanning => "Scanning for devices…".into(),
-                    (false, _) if self.scan_error.is_some() => "Device scan failed".into(),
-                    (false, Some(true)) => "DONE".into(),
-                    (false, Some(false)) => t("MSG_212"),
-                    (false, None) => tf(
-                        if self.drives.len() == 1 {
-                            "MSG_208"
-                        } else {
-                            "MSG_209"
-                        },
-                        &[&self.drives.len().to_string()],
-                    ),
-                };
-                ui.label(status);
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let t = self
-                        .started
-                        .map(|t| t.elapsed())
-                        .unwrap_or(self.elapsed)
-                        .as_secs();
-                    ui.monospace(format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60));
-                    ui.add(
-                        shadcn_egui::components::separator::Separator::new().orientation(
-                            shadcn_egui::components::separator::SeparatorOrientation::Vertical,
+        let surface = ctx.shadcn_theme().background;
+        egui::Panel::bottom("statusbar")
+            .frame(
+                egui::Frame::NONE
+                    .fill(surface)
+                    .inner_margin(egui::Margin::symmetric(12, 4)),
+            )
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let status = match (self.busy.is_some(), self.done) {
+                        (true, _) => self.status.clone(),
+                        (false, _) if self.scanning => "Scanning for devices…".into(),
+                        (false, _) if self.scan_error.is_some() => "Device scan failed".into(),
+                        (false, Some(true)) => "DONE".into(),
+                        (false, Some(false)) => t("MSG_212"),
+                        (false, None) => tf(
+                            if self.drives.len() == 1 {
+                                "MSG_208"
+                            } else {
+                                "MSG_209"
+                            },
+                            &[&self.drives.len().to_string()],
                         ),
-                    );
+                    };
+                    ui.label(status);
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let t = self
+                            .started
+                            .map(|t| t.elapsed())
+                            .unwrap_or(self.elapsed)
+                            .as_secs();
+                        ui.monospace(format!("{:02}:{:02}:{:02}", t / 3600, t / 60 % 60, t % 60));
+                        ui.add(functora_egui::Separator::vertical());
+                    });
                 });
             });
+        egui::Panel::bottom("actions")
+            .frame(
+                egui::Frame::NONE
+                    .fill(surface)
+                    .inner_margin(egui::Margin::symmetric(12, 10)),
+            )
+            .show(ui, |ui| self.footer(ui));
+        egui::CentralPanel::default_margins().show(ui, |ui| {
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.add_enabled_ui(self.busy.is_none(), |ui| {
+                        self.drive_section(ui);
+                        self.format_section(ui);
+                    });
+                    self.status_section(ui);
+                });
         });
-        let content_height = egui::CentralPanel::default_margins()
-            .show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.add_enabled_ui(self.busy.is_none(), |ui| {
-                            self.drive_section(ui);
-                            self.format_section(ui);
-                        });
-                        self.status_section(ui);
-                    })
-                    .content_size
-                    .y
-            })
-            .inner;
-        // Like Rufus, grow or shrink the window with the advanced sections.
-        let max_height = ctx.input(|i| {
-            let viewport = i.viewport();
-            let decoration = viewport
-                .outer_rect
-                .zip(viewport.inner_rect)
-                .map(|(outer, inner)| (outer.height() - inner.height()).max(0.0))
-                .unwrap_or(32.0);
-            // Leave room for the desktop's menu bar and taskbar/dock.
-            (viewport.monitor_size.map_or(768.0, |size| size.y) - decoration - 80.0).max(100.0)
-        });
-        let want = (content_height + 60.0).min(max_height);
-        if (want - self.height).abs() > 1.0 {
-            self.height = want;
-            // A fixed-size window only resizes when its size limits move too.
-            let size = egui::vec2(470.0, want);
-            ctx.send_viewport_cmd(egui::ViewportCommand::MinInnerSize(size));
-            ctx.send_viewport_cmd(egui::ViewportCommand::MaxInnerSize(size));
-            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(size));
-        }
         self.dialogs(&ctx);
     }
 }
@@ -721,8 +708,9 @@ fn rustfus_name(s: &str) -> String {
 
 pub fn run() -> eframe::Result {
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([470.0, 610.0])
-        .with_resizable(false);
+        .with_inner_size([520.0, 700.0])
+        .with_min_inner_size([470.0, 440.0])
+        .with_resizable(true);
     if let Ok(icon) =
         eframe::icon_data::from_png_bytes(include_bytes!("../../../../res/rustfus.png"))
     {
@@ -762,30 +750,77 @@ mod tests {
     }
 
     fn form_harness(app: App) -> Harness<'static, App> {
-        Harness::builder()
-            .with_size(egui::vec2(470.0, 900.0))
-            .build_ui_state(
-                |ui, app| {
-                    rufus_style(ui.ctx(), app.dark);
-                    app.poll();
+        form_harness_at(app, egui::vec2(470.0, 900.0))
+    }
+
+    fn form_harness_at(app: App, size: egui::Vec2) -> Harness<'static, App> {
+        Harness::builder().with_size(size).build_ui_state(
+            |ui, app| {
+                ui.ctx().set_theme(app.theme_preference);
+                sync_style(ui.ctx());
+                app.poll();
+                let ctx = ui.ctx().clone();
+                let viewport = ctx.content_rect();
+                // The kittest UI wrapper has an 8-point margin; the native root does not.
+                let mut root = ui.new_child(egui::UiBuilder::new().max_rect(viewport));
+                let surface = ctx.shadcn_theme().background;
+                let status = egui::Panel::bottom("statusbar")
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(surface)
+                            .inner_margin(egui::Margin::symmetric(12, 4)),
+                    )
+                    .show(&mut root, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.label(&app.status);
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.monospace("00:00:00");
+                                    ui.add(functora_egui::Separator::vertical());
+                                },
+                            );
+                        });
+                    });
+                let actions = egui::Panel::bottom("actions")
+                    .frame(
+                        egui::Frame::NONE
+                            .fill(surface)
+                            .inner_margin(egui::Margin::symmetric(12, 10)),
+                    )
+                    .show(&mut root, |ui| app.footer(ui));
+                let central = egui::CentralPanel::default_margins().show(&mut root, |ui| {
                     let form = egui::ScrollArea::vertical()
                         .auto_shrink([false, false])
                         .show(ui, |ui| {
-                            app.drive_section(ui);
-                            app.format_section(ui);
+                            ui.add_enabled_ui(app.busy.is_none(), |ui| {
+                                app.drive_section(ui);
+                                app.format_section(ui);
+                            });
                             app.status_section(ui);
                         });
-                    let viewport = ui.ctx().content_rect();
                     assert!(viewport.contains_rect(form.inner_rect));
                     assert!(
                         form.content_size.x <= form.inner_rect.width() + 1.0,
-                        "horizontal form overflow: {:?}",
-                        form.content_size
+                        "horizontal form overflow: content {:?}, viewport {:?}",
+                        form.content_size,
+                        form.inner_rect
                     );
-                    app.dialogs(ui.ctx());
-                },
-                app,
-            )
+                });
+                ctx.data_mut(|data| {
+                    data.insert_temp(
+                        egui::Id::new("test-panel-rects"),
+                        [
+                            status.response.rect,
+                            actions.response.rect,
+                            central.response.rect,
+                        ],
+                    );
+                });
+                app.dialogs(&ctx);
+            },
+            app,
+        )
     }
 
     fn action_text(key: &str) -> String {
@@ -805,7 +840,11 @@ mod tests {
         for dark in [false, true] {
             for advanced in [false, true] {
                 let (mut app, _scan_tx) = form_app();
-                app.dark = dark;
+                app.theme_preference = if dark {
+                    egui::ThemePreference::Dark
+                } else {
+                    egui::ThemePreference::Light
+                };
                 app.adv_drive = advanced;
                 app.adv_format = advanced;
                 let mut harness = form_harness(app);
@@ -847,6 +886,116 @@ mod tests {
                 );
                 assert!(harness.state().busy.is_none());
                 assert!(harness.state().update_rx.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn language_popover_opens_only_on_request_and_escape_preserves_language() {
+        let (app, _scan_tx) = form_app();
+        let mut harness = form_harness_at(app, egui::vec2(470.0, 700.0));
+        let original = loc::current();
+        let language = loc::languages().into_iter().next().unwrap();
+        assert!(harness.query_by_label(&language.name).is_none());
+        harness.get_by_label(&t("MSG_273")).click();
+        harness.run();
+        harness.get_by_label(&language.name);
+        assert_eq!(loc::current(), original);
+        harness.key_press(egui::Key::Escape);
+        harness.run();
+        assert!(harness.query_by_label(&language.name).is_none());
+        assert_eq!(loc::current(), original);
+        assert!(harness.state().busy.is_none());
+    }
+
+    #[test]
+    fn footer_icons_and_actions_remain_inline_at_supported_widths() {
+        for width in [470.0, 520.0] {
+            for busy in [false, true] {
+                let (mut app, _scan_tx) = form_app();
+                let (job_tx, job_rx) = channel();
+                let cancel = Arc::new(AtomicBool::new(false));
+                if busy {
+                    app.busy = Some((job_rx, cancel.clone()));
+                }
+                let mut harness = form_harness_at(app, egui::vec2(width, 440.0));
+                harness.run();
+                let action = action_text(if busy { "MSG_007" } else { "IDC_START" });
+                let action_rect = harness.get_by_label(&action).rect();
+                let close_label = action_text("IDCANCEL");
+                let close = harness.get_by_label(&close_label);
+                assert_eq!(close.accesskit_node().is_disabled(), busy);
+                let viewport = harness.ctx.content_rect();
+                for label in [
+                    t("MSG_273"),
+                    t("MSG_302"),
+                    t("MSG_301"),
+                    t("MSG_303"),
+                    action.clone(),
+                    action_text("IDCANCEL"),
+                ] {
+                    let rect = harness.get_by_label(&label).rect();
+                    assert!(
+                        viewport.contains_rect(rect),
+                        "{label}: {rect:?} outside {viewport:?}, busy={busy}"
+                    );
+                    assert!(
+                        (rect.center().y - action_rect.center().y).abs() <= 1.0,
+                        "{label}: {rect:?} is not inline with {action_rect:?}"
+                    );
+                }
+                if busy {
+                    harness.get_by_label(&action).click();
+                    harness.run();
+                    assert!(cancel.load(Ordering::Relaxed));
+                    assert!(harness.state().busy.is_some());
+                    assert!(harness.state().started.is_none());
+                }
+                drop(job_tx);
+            }
+        }
+    }
+
+    fn painted_rects(shape: &egui::epaint::Shape, rects: &mut Vec<(egui::Rect, egui::Color32)>) {
+        match shape {
+            egui::epaint::Shape::Rect(rect) => rects.push((rect.rect, rect.fill)),
+            egui::epaint::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    painted_rects(shape, rects);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    #[test]
+    fn root_and_footer_panels_have_opaque_matching_theme_surfaces() {
+        for preference in [egui::ThemePreference::Light, egui::ThemePreference::Dark] {
+            let (mut app, _scan_tx) = form_app();
+            app.theme_preference = preference;
+            let mut harness = form_harness_at(app, egui::vec2(520.0, 700.0));
+            harness.run();
+            let surface = harness.ctx.shadcn_theme().background;
+            assert_eq!(surface.a(), 255);
+            if preference == egui::ThemePreference::Light {
+                assert_eq!(surface, egui::Color32::WHITE);
+            }
+            assert_eq!(harness.ctx.global_style().visuals.panel_fill, surface);
+            let panels = harness.ctx.data(|data| {
+                data.get_temp::<[egui::Rect; 3]>(egui::Id::new("test-panel-rects"))
+                    .unwrap()
+            });
+            let mut rects = Vec::new();
+            for shape in &harness.output().shapes {
+                painted_rects(&shape.shape, &mut rects);
+            }
+            for panel in panels {
+                assert!(
+                    rects
+                        .iter()
+                        .any(|(rect, fill)| *rect == panel && *fill == surface),
+                    "panel {panel:?} has no opaque theme fill {surface:?}; painted: {rects:?}"
+                );
             }
         }
     }

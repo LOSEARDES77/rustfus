@@ -5,14 +5,13 @@
 
 use super::{App, Dialog, rustfus_name};
 use crate::widgets::{
-    button, checkbox, combo, input, modal, ok_cancel, os_window, progress, rufus_style, separator,
+    button, checkbox, combo, input, modal, ok_cancel, os_window, progress, separator, spinner,
 };
 use eframe::egui::{self, Color32};
 use rustfus_core::loc::{t, tf};
 use rustfus_core::ops::{self, Msg};
 use rustfus_core::update::{Interval, Version};
 use rustfus_core::{drives, fido, net, syslinux};
-use shadcn_egui::components::{input::Input, textarea::Textarea};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -186,8 +185,9 @@ impl App {
                                     let label = ui.label(*name);
                                     let mut v = v.as_str();
                                     ui.add(
-                                        // The shared input edits Strings; checksum values stay read-only.
-                                        Input::new(&mut v).max_width(340.0),
+                                        // Functora 0.2 inputs have no read-only mode;
+                                        // egui's immutable buffer preserves selection and copy.
+                                        egui::TextEdit::singleline(&mut v).desired_width(340.0),
                                     )
                                     .labelled_by(label.id);
                                     ui.end_row();
@@ -239,8 +239,7 @@ impl App {
                     }
                     if st.rx.is_some() {
                         ui.horizontal(|ui| {
-                            // shadcn-egui has no spinner component.
-                            ui.spinner();
+                            spinner(ui);
                             ui.label(t("MSG_142"));
                         });
                     } else if st.chosen.len() < fido::FIELDS.len() && !st.options.is_empty() {
@@ -338,6 +337,9 @@ impl App {
             download = None;
         }
         if let Some(d) = next {
+            if matches!(self.dialog, Dialog::Hash(..)) && matches!(d, Dialog::None) {
+                self.hash_rx = None;
+            }
             self.dialog = d;
         }
         if let Some(st) = stage {
@@ -397,7 +399,9 @@ impl App {
                     .show(ui, |ui| {
                         let text = log.join("\n");
                         let mut text = text.as_str();
-                        ui.add(Textarea::new(&mut text).desired_width(f32::INFINITY));
+                        // Functora 0.2 Textarea has no read-only mode; an immutable
+                        // buffer preserves selection without allowing edits.
+                        ui.add(egui::TextEdit::multiline(&mut text).desired_width(f32::INFINITY));
                     });
             },
         );
@@ -421,7 +425,7 @@ impl App {
                 ui.label("License: GNU General Public License (GPL) version 3 or later.");
             },
         );
-        let mut dark = self.dark;
+        let mut theme_preference = self.theme_preference;
         let mut policy = self.update.clone();
         let (checking, note) = (self.update_rx.is_some(), &self.update_note);
         let mut check_now = false;
@@ -432,7 +436,18 @@ impl App {
             &t("IDD_UPDATE_POLICY"),
             [320.0, 150.0],
             |ui| {
-                checkbox(ui, &mut dark, "Dark mode");
+                let label = ui.label("Theme");
+                combo(
+                    ui,
+                    "theme_preference",
+                    &mut theme_preference,
+                    &[
+                        (egui::ThemePreference::System, "System".into()),
+                        (egui::ThemePreference::Light, "Light".into()),
+                        (egui::ThemePreference::Dark, "Dark".into()),
+                    ],
+                    label.id,
+                );
                 separator(ui);
                 egui::Grid::new("update_policy")
                     .num_columns(2)
@@ -464,16 +479,15 @@ impl App {
                         .add_enabled(!checking, button(t("IDC_CHECK_NOW")))
                         .clicked();
                     if checking {
-                        // shadcn-egui has no spinner component.
-                        ui.spinner();
+                        spinner(ui);
                     }
                     ui.label(note);
                 });
             },
         );
-        if dark != self.dark {
-            self.dark = dark;
-            rufus_style(ctx, dark);
+        if theme_preference != self.theme_preference {
+            self.theme_preference = theme_preference;
+            ctx.set_theme(theme_preference);
         }
         if policy != self.update {
             self.update = policy;
