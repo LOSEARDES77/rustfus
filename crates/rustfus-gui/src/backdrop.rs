@@ -55,12 +55,7 @@ mod contrast_tests {
 }
 
 pub(crate) fn tint(background: Hsla, enabled: bool) -> Hsla {
-    background.alpha(if enabled && SUPPORTED {
-        // Light text tokens are dark: retain a light base even over a black desktop.
-        if background.l > 0.5 { 0.80 } else { 0.20 }
-    } else {
-        1.
-    })
+    background.alpha(if enabled && SUPPORTED { 0.80 } else { 1. })
 }
 
 pub(crate) fn card_surface(color: Hsla, enabled: bool) -> Hsla {
@@ -98,7 +93,7 @@ mod tests {
             assert_eq!(appearance(true), WindowBackgroundAppearance::Blurred);
             let background: Hsla = rgb(0x202020).into();
             let tinted = tint(background, true);
-            assert_eq!(tinted.a, 0.20);
+            assert_eq!(tinted.a, 0.80);
             assert_eq!(tinted.h, background.h);
             assert_eq!(tinted.s, background.s);
             assert_eq!(tinted.l, background.l);
@@ -110,7 +105,7 @@ mod tests {
         let light: Hsla = rgb(0xffffff).into();
         if SUPPORTED {
             assert_eq!(tint(light, true).a, 0.80);
-            assert!(tint(light, true).a > tint(rgb(0x202020).into(), true).a);
+            assert_eq!(tint(light, true).a, tint(rgb(0x202020).into(), true).a);
             assert!(tint(light, true).a < 1.);
         }
         assert_eq!(tint(light, false).a, 1.);
