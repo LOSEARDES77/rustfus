@@ -6,7 +6,7 @@
 use super::{App, BootSel, Dialog, FidoState, MB};
 use crate::widgets::{
     action_label, bad_block_mode, button, checkbox, cluster_name, combo, icon_button, input,
-    menu_item, popover, progress, section, select, spinner, toggle,
+    menu_item, paired_columns, popover, progress, section, select, spinner, toggle,
 };
 use eframe::egui;
 use functora_egui::{ButtonGroup, ButtonVariant, DropdownMenu, Slider};
@@ -249,7 +249,7 @@ impl App {
 
         let formatting = !self.dd;
         ui.add_enabled_ui(formatting, |ui| {
-            ui.columns(2, |c| {
+            paired_columns(ui, |c| {
                 let scheme_label = c[0].label(t("IDS_PARTITION_TYPE_TXT"));
                 let schemes = [
                     (Scheme::Mbr, "MBR".to_string()),
@@ -337,7 +337,7 @@ impl App {
                     )
                 })
                 .collect();
-            ui.columns(2, |c| {
+            paired_columns(ui, |c| {
                 let fs_label = c[0].label(t("IDS_FILE_SYSTEM_TXT"));
                 if combo(&mut c[0], "fs", &mut self.fs, &fss, fs_label.id) {
                     self.cluster = 0;
@@ -366,7 +366,7 @@ impl App {
             ui.add_enabled_ui(formatting, |ui| {
                 checkbox(ui, &mut self.ext_label, t("IDC_EXTENDED_LABEL"));
             });
-            ui.columns(2, |c| {
+            paired_columns(ui, |c| {
                 let passes_label = checkbox(&mut c[0], &mut self.bad_blocks, t("IDC_BAD_BLOCKS"));
                 c[1].add_enabled_ui(self.bad_blocks, |ui| {
                     let passes: Vec<(u8, String)> = (0..image::BAD_BLOCK_MODES.len() as u8)

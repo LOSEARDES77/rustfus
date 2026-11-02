@@ -375,7 +375,7 @@ pub(crate) fn select(
             ui.spacing_mut().button_padding = egui::vec2(8.0, 8.0);
             ui.add_enabled_ui(!choices.is_empty(), |ui| {
                 egui::ComboBox::from_id_salt(id)
-                    .width((ui.available_width() - ui.spacing().button_padding.x * 2.0).max(1.0))
+                    .width(ui.available_width().max(1.0))
                     .height(240.0)
                     .truncate()
                     .selected_text(shown)
@@ -567,15 +567,29 @@ pub(crate) fn section(ui: &mut egui::Ui, title: &str) {
 
 pub(crate) fn toggle(ui: &mut egui::Ui, open: &mut bool, what: &str) {
     let text = tf(if *open { "MSG_122" } else { "MSG_121" }, &[what]);
-    if menu_item(
-        ui,
-        format!("{}  {text}", if *open { "⌃" } else { "⌄" }),
-        false,
-    )
-    .clicked()
-    {
+    let response = ui
+        .scope(|ui| {
+            ui.spacing_mut().interact_size.y = 28.0;
+            ui.spacing_mut().button_padding = egui::vec2(0.0, 4.0);
+            ui.add_sized(
+                [ui.available_width(), 28.0],
+                egui::Button::new(format!("{}  {text}", if *open { "⌃" } else { "⌄" }))
+                    .right_text("")
+                    .frame_when_inactive(false),
+            )
+        })
+        .inner;
+    if response.clicked() {
         *open = !*open;
     }
+}
+
+pub(crate) fn paired_columns<R>(ui: &mut egui::Ui, body: impl FnOnce(&mut [egui::Ui]) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.x = 12.0;
+        ui.columns(2, body)
+    })
+    .inner
 }
 
 /// Rufus' bad blocks combo labels (MSG_034/035/087); index = `image::BAD_BLOCK_MODES` entry.
@@ -738,6 +752,90 @@ mod tests {
         Harness,
         kittest::{NodeT, Queryable},
     };
+
+    #[test]
+    fn fields_share_full_width_edges_and_equal_column_gaps() {
+        for width in [470.0, 520.0, 680.0] {
+            let mut harness = Harness::builder()
+                .with_size(egui::vec2(width, 420.0))
+                .build_ui(|ui| {
+                    sync_style(ui.ctx());
+                    let mut text = String::new();
+                    let full = input(ui, &mut text).rect;
+                    let choices = ["First".to_owned(), "Second".to_owned()];
+                    let pair = paired_columns(ui, |columns| {
+                        let left = select(&mut columns[0], "left", &mut 0, &choices, "Left").rect;
+                        let right =
+                            select(&mut columns[1], "right", &mut 0, &choices, "Right").rect;
+                        (left, right)
+                    });
+                    let rule = separator(ui).rect;
+                    ui.ctx().data_mut(|d| {
+                        d.insert_temp(egui::Id::new("aligned-fields"), (full, pair, rule))
+                    });
+                });
+            harness.run();
+            let (full, (left, right), rule) = harness.ctx.data(|d| {
+                d.get_temp::<(egui::Rect, (egui::Rect, egui::Rect), egui::Rect)>(egui::Id::new(
+                    "aligned-fields",
+                ))
+                .unwrap()
+            });
+            assert!(
+                (left.width() - right.width()).abs() <= 1.0,
+                "{left:?} {right:?}"
+            );
+            assert!((left.left() - full.left()).abs() <= 0.5);
+            assert!(
+                (right.right() - full.right()).abs() <= 0.5,
+                "right {right:?}, full {full:?}"
+            );
+            assert!(
+                (right.left() - left.right() - 12.0).abs() <= 1.0,
+                "{left:?} {right:?}"
+            );
+            assert!((rule.left() - full.left()).abs() <= 0.5);
+            assert!((rule.right() - full.right()).abs() <= 0.5);
+        }
+    }
+
+    #[test]
+    fn advanced_disclosure_text_is_left_aligned() {
+        fn text_position(shape: &egui::epaint::Shape, expected: &str) -> Option<f32> {
+            match shape {
+                egui::epaint::Shape::Text(text) if text.galley.text().contains(expected) => {
+                    Some(text.pos.x)
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().find_map(|s| text_position(s, expected))
+                }
+                _ => None,
+            }
+        }
+        let mut harness = Harness::builder()
+            .with_size(egui::vec2(520.0, 120.0))
+            .build_ui(|ui| {
+                sync_style(ui.ctx());
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(egui::Id::new("disclosure-left"), ui.cursor().left())
+                });
+                toggle(ui, &mut false, "drive properties");
+            });
+        harness.run();
+        let left = harness
+            .ctx
+            .data(|d| d.get_temp::<f32>(egui::Id::new("disclosure-left")).unwrap());
+        let text = harness
+            .output()
+            .shapes
+            .iter()
+            .find_map(|shape| text_position(&shape.shape, "drive properties"))
+            .unwrap();
+        assert!(
+            (text - left).abs() <= 2.0,
+            "text {text} not aligned with left {left}"
+        );
+    }
 
     #[test]
     fn theme_initializes_before_the_first_frame() {

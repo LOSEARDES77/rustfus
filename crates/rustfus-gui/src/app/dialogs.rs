@@ -373,6 +373,16 @@ impl App {
             self.start_job(ctx);
         }
 
+        #[cfg(target_os = "macos")]
+        if self.show_about {
+            self.show_about = false;
+            if let Err(error) = crate::about::show() {
+                self.log
+                    .push(format!("Could not show About Rustfus: {error}"));
+            }
+        }
+
+        #[cfg(not(target_os = "macos"))]
         os_window(
             ctx,
             "about",

@@ -3,6 +3,8 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! Rustfus' Rufus-style egui interface.
 
+#[cfg(target_os = "macos")]
+mod about;
 mod app;
 mod widgets;
 
