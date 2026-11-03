@@ -1,0 +1,12 @@
+{
+  "ntfs-3g": {
+    "version": "2026.9.28",
+    "commit": "7f0f841fc52cf719106c5c93bafe465004e36816",
+    "url": "https://github.com/tuxera/ntfs-3g.git"
+  },
+  "wimlib": {
+    "version": "1.14.5",
+    "commit": "cd5e231c348c255ae5088873b5a66ee0eb96fa07",
+    "url": "https://github.com/ebiggers/wimlib.git"
+  }
+}

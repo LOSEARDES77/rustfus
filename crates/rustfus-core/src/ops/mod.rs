@@ -19,10 +19,14 @@ mod format;
 mod layout;
 #[cfg(target_os = "macos")]
 pub mod macos;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod ntfs;
 #[cfg(test)]
 #[path = "../../tests/unit/ops.rs"]
 mod tests;
 mod to_go;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod wim;
 
 use dd::write_dd;
 use format::write_fs;
@@ -130,7 +134,7 @@ impl Fs {
             Fs::Fat | Fs::Fat32 | Fs::Exfat | Fs::Udf => true,
             Fs::Refs => cfg!(windows),
             Fs::Ext2 | Fs::Ext3 | Fs::Ext4 => true,
-            Fs::Ntfs => !cfg!(target_os = "macos"),
+            Fs::Ntfs => cfg!(any(windows, target_os = "macos", target_os = "linux")),
         }
     }
 
@@ -488,6 +492,30 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    fn bad_blocks(&self, job: &Job) -> Result<(), String> {
+        let Some(passes) = job.bad_blocks else {
+            return Ok(());
+        };
+        self.check()?;
+        unmount(&job.drive)?;
+        let report = image::bad_blocks(
+            &raw_path(&job.drive),
+            job.drive.size,
+            usize::from(passes),
+            &|p, s| self.progress(p, s),
+            self.cancel,
+        )
+        .map_err(e)?;
+        let message = format!(
+            "Bad blocks check: {} bad sectors ({} read, {} write, {} corruption errors)",
+            report.bad_sectors, report.read_errors, report.write_errors, report.corruption_errors
+        );
+        self.log(&message);
+        if report.bad_sectors > 0 {
+            return Err(message);
+        }
+        Ok(())
+    }
     fn open_unmounted(&self, drive: &Drive) -> Result<File, String> {
         self.check()?;
         self.log(format!("Verifying and unmounting {}", drive.path));
@@ -551,28 +579,15 @@ pub(crate) fn run_job_with_image(
     {
         return macos::run(job, pinned, tx, cancel);
     }
-    if let Some(passes) = job.bad_blocks {
-        unmount(&job.drive)?;
-        let report = image::bad_blocks(
-            &raw_path(&job.drive),
-            job.drive.size,
-            usize::from(passes),
-            &|p, s| ctx.progress(p, s),
-            cancel,
-        )
-        .map_err(e)?;
-        let msg = format!(
-            "Bad blocks check: {} bad sectors ({} read, {} write, {} corruption errors)",
-            report.bad_sectors, report.read_errors, report.write_errors, report.corruption_errors
-        );
-        ctx.log(&msg);
-        if report.bad_sectors > 0 {
-            return Err(msg);
-        }
-    }
     match &job.boot {
-        Boot::Image(img) if job.dd => write_dd(img, pinned, &job.drive, job.verify, &ctx),
-        Boot::Image(img) if job.wtg.is_some() => write_wtg(job, img, &ctx),
+        Boot::Image(img) if job.dd => {
+            ctx.bad_blocks(job)?;
+            write_dd(img, pinned, &job.drive, job.verify, &ctx)
+        }
+        Boot::Image(img) if job.wtg.is_some() => {
+            ctx.bad_blocks(job)?;
+            write_wtg(job, img, &ctx)
+        }
         _ => write_fs(job, pinned, &ctx),
     }
 }

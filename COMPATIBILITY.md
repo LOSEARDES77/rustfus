@@ -32,7 +32,8 @@ native CI/runtime confirmation.
 | UDF images | 🟢 | 🟢 | 🟢 | read-only, 2048-byte blocks |
 | ISOHybrid ISO/DD prompt | 🟢 | 🟢 | 🟢 | |
 | Windows install USB, FAT32 (UEFI + BIOS) | 🟢 | 🟢 | 🟡 | macOS UEFI/GPT uses diskutil + mounted copy; physical USB/boot unverified, BIOS remains raw |
-| Windows install USB, NTFS + UEFI:NTFS (>4 GB files) | 🟡 | 🟢 | 🔴 | Linux needs `mkfs.ntfs`; macOS can't write NTFS |
+| Windows install USB, NTFS + UEFI:NTFS (>4 GB files) | 🟡 | 🟢 | 🟡 | bundled FUSE-free NTFS-3G image preparation; temporary partition-image space required; physical USB/boot unverified |
+| FAT32 install.wim splitting | 🟢 | 🔴 | 🟡 | bundled wimlib on Linux/macOS; validates parts before erasure; oversized ESD requires NTFS |
 | Windows install USB, exFAT | 🔴 | 🔴 | 🔴 | refused: UEFI:NTFS loads bootmgfw.efi, but Windows Boot Manager can't read the BCD from exFAT (0xc0000272) |
 | Windows User Experience (unattend.xml) | 🟢 | 🟢 | 🟢 | |
 | Windows To Go | 🔴 | 🟡 | 🔴 | DISM + bcdboot; untested |
@@ -54,7 +55,7 @@ native CI/runtime confirmation.
 | File system | Linux | Windows | macOS | Notes |
 |---|:-:|:-:|:-:|---|
 | FAT / FAT32 (any size) | 🟢 | 🟢 | 🟢 | own formatter, no 32 GB limit |
-| NTFS | 🟡 | 🟢 | 🔴 | Linux: `mkfs.ntfs` (ntfs-3g) |
+| NTFS | 🟢 | 🟢 | 🟡 | bundled NTFS-3G formatter and image writer on Linux/macOS, no FUSE; physical macOS validation pending |
 | exFAT | 🟡 | 🟢 | 🟢 | Linux: `mkfs.exfat` (exfatprogs) |
 | UDF | 🟡 | 🟢 | 🟢 | Linux: `mkudffs` (udftools) |
 | ReFS | 🔴 | 🟡 | 🔴 | Windows editions with ReFS support only |

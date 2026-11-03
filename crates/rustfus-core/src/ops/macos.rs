@@ -3,27 +3,26 @@
 //! OS-managed Windows UEFI media. This path never opens a raw disk or elevates.
 
 use super::files::{Dest, MountedDir, copy_files_replacing};
+use super::wim::{stage_wim, validate_split_paths};
 use super::{Boot, Ctx, Fs, Job, MB, Msg, Report, Scheme, Target};
 use crate::{
     drives::{self, Drive},
-    iso::{Entry, Iso},
+    iso::Iso,
 };
 use plist::Value;
 use std::{
     collections::HashSet,
     ffi::{CStr, CString},
     fs::{self, File},
-    io::{Cursor, Read, Seek, SeekFrom, Write},
+    io::Cursor,
     os::unix::{ffi::OsStrExt, fs::MetadataExt},
     path::{Path, PathBuf},
-    process::{Command, Stdio},
+    process::Command,
     sync::{atomic::AtomicBool, mpsc::Sender},
-    time::Duration,
 };
 
 const FAT_MAX_FILE: u64 = (4 << 30) - 1;
 const DISKUTIL: &str = "/usr/sbin/diskutil";
-type SplitFiles = Vec<(String, PathBuf)>;
 
 /// Routing only: unsupported options on this path fail preflight, never fall
 /// through to the raw writer after partial formatting.
@@ -300,165 +299,6 @@ fn mount_identity(root: &Path) -> Result<MountIdentity, String> {
         kind,
         device: fs::symlink_metadata(root).map_err(|e| e.to_string())?.dev(),
     })
-}
-
-fn copy_iso_entry(iso: &Iso, entry: &Entry, destination: &Path, ctx: &Ctx) -> Result<(), String> {
-    let mut reader = iso.reader(entry).map_err(super::e)?;
-    let mut output = File::create(destination).map_err(super::e)?;
-    let mut buffer = vec![0; 4 << 20];
-    let mut done = 0u64;
-    loop {
-        ctx.check()?;
-        let read = reader.read(&mut buffer).map_err(super::e)?;
-        if read == 0 {
-            break;
-        }
-        output.write_all(&buffer[..read]).map_err(super::e)?;
-        done += read as u64;
-        ctx.progress(
-            done as f32 / entry.size.max(1) as f32,
-            "Staging install.wim before erasing USB…",
-        );
-    }
-    if done != entry.size {
-        return Err("Unexpected end of install.wim; no disk was erased".into());
-    }
-    output.sync_all().map_err(super::e)
-}
-
-fn wimlib() -> Result<PathBuf, String> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    for path in std::env::split_paths(&search).chain([
-        PathBuf::from("/opt/homebrew/bin"),
-        PathBuf::from("/usr/local/bin"),
-    ]) {
-        let candidate = path.join("wimlib-imagex");
-        if candidate.is_file()
-            && Command::new(&candidate)
-                .arg("--version")
-                .output()
-                .is_ok_and(|out| out.status.success())
-        {
-            return candidate.canonicalize().map_err(super::e);
-        }
-    }
-    Err("Windows install.wim exceeds FAT32's 4 GB limit. Install wimlib (brew install wimlib), then retry. No disk was erased.".into())
-}
-
-struct StagedWim {
-    _directory: tempfile::TempDir,
-    original: String,
-    files: SplitFiles,
-}
-fn stage_wim(iso: &Iso, entry: &Entry, ctx: &Ctx) -> Result<StagedWim, String> {
-    let tool = wimlib()?;
-    let directory = tempfile::Builder::new()
-        .prefix("rustfus-wim-")
-        .tempdir()
-        .map_err(super::e)?;
-    let source = directory.path().join("input.wim");
-    copy_iso_entry(iso, entry, &source, ctx)?;
-    let output = directory.path().join("install.swm");
-    let mut diagnostics = tempfile::tempfile().map_err(super::e)?;
-    let stdout = diagnostics.try_clone().map_err(super::e)?;
-    let stderr = diagnostics.try_clone().map_err(super::e)?;
-    ctx.progress(0., "Splitting install.wim for FAT32 before erasing USB…");
-    let mut child = Command::new(tool)
-        .arg("split")
-        .arg(&source)
-        .arg(&output)
-        .arg("3800")
-        .stdin(Stdio::null())
-        .stdout(stdout)
-        .stderr(stderr)
-        .spawn()
-        .map_err(super::e)?;
-    let status = loop {
-        if let Err(error) = ctx.check() {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
-        match child.try_wait() {
-            Ok(Some(status)) => break status,
-            Ok(None) => std::thread::sleep(Duration::from_millis(100)),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(error.to_string());
-            }
-        }
-    };
-    if !status.success() {
-        diagnostics.seek(SeekFrom::Start(0)).map_err(super::e)?;
-        let mut message = String::new();
-        diagnostics
-            .take(16384)
-            .read_to_string(&mut message)
-            .map_err(super::e)?;
-        return Err(format!(
-            "Could not split install.wim; no disk was erased. {}",
-            message.trim()
-        ));
-    }
-    let parent = entry
-        .path
-        .rsplit_once('/')
-        .ok_or("Invalid install.wim path")?
-        .0;
-    let mut files = Vec::new();
-    for item in fs::read_dir(directory.path()).map_err(super::e)? {
-        let path = item.map_err(super::e)?.path();
-        let Some(name) = path.file_name().and_then(|s| s.to_str()) else {
-            continue;
-        };
-        if !name.ends_with(".swm") {
-            continue;
-        }
-        let metadata = fs::symlink_metadata(&path).map_err(super::e)?;
-        if !metadata.is_file() || metadata.len() == 0 || metadata.len() > FAT_MAX_FILE {
-            return Err(
-                "A split WIM part exceeds FAT32 limits or is invalid; no disk was erased".into(),
-            );
-        }
-        let mut header = [0; 8];
-        File::open(&path)
-            .and_then(|mut file| file.read_exact(&mut header))
-            .map_err(super::e)?;
-        if &header != b"MSWIM\0\0\0" {
-            return Err("Invalid split WIM output; no disk was erased".into());
-        }
-        files.push((format!("{parent}/{name}"), path));
-    }
-    if !files
-        .iter()
-        .any(|(_, file)| file.file_name().is_some_and(|name| name == "install.swm"))
-    {
-        return Err("wimlib produced no install.swm; no disk was erased".into());
-    }
-    files.sort();
-    Ok(StagedWim {
-        _directory: directory,
-        original: entry.path.clone(),
-        files,
-    })
-}
-
-fn validate_split_paths<'a>(
-    existing: impl IntoIterator<Item = &'a str>,
-    files: &SplitFiles,
-) -> Result<(), String> {
-    let existing: HashSet<_> = existing.into_iter().map(str::to_ascii_lowercase).collect();
-    let mut seen = HashSet::new();
-    for (path, _) in files {
-        let lower = path.to_ascii_lowercase();
-        if !safe_path(path) || existing.contains(&lower) || !seen.insert(lower) {
-            return Err(format!(
-                "Split WIM output conflicts with ISO content: {path}. No disk was erased."
-            ));
-        }
-    }
-    Ok(())
 }
 
 pub(super) fn run(

@@ -1,0 +1,6 @@
+[submodule "vendor/ntfs-3g"]
+	path = vendor/ntfs-3g
+	url = https://github.com/tuxera/ntfs-3g.git
+[submodule "vendor/wimlib"]
+	path = vendor/wimlib
+	url = https://github.com/ebiggers/wimlib.git

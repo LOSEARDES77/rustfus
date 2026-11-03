@@ -48,10 +48,15 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for what works on each OS.
 Requires Rust 1.95 or newer (edition 2024).
 
 ```sh
+git submodule update --init --recursive
 cargo build --release
 ```
 
 The executable is `target/release/rustfus` (`rustfus.exe` on Windows).
+macOS/Linux builds also require a C compiler, Python 3, autoconf, automake,
+GNU libtool, make and pkg-config. [Native-tool build details](docs/native-tools.md)
+cover setup and the pinned NTFS-3G/wimlib submodules. These are build-time
+requirements; the resulting executable embeds its NTFS and WIM helpers.
 
 The code is split into a workspace:
 
@@ -94,9 +99,10 @@ to manage removable storage. This path requires Quick format, default cluster
 size, and no persistence, bad-block test, or legacy BIOS options. It never
 falls back to raw writes after an error.
 
-For `sources/install.wim` larger than 4 GB, install `wimlib-imagex` with
-`brew install wimlib`. Rustfus stages and validates split `.swm` files **before
-any erase**. Oversized `install.esd` and other oversized files are rejected.
+For `sources/install.wim` larger than 4 GB, Rustfus uses bundled wimlib on
+macOS/Linux. No Homebrew or system wimlib installation is needed. Rustfus stages
+and validates split `.swm` files **before any erase**. Oversized `install.esd`
+and other oversized files require NTFS rather than FAT32.
 Cancellation waits for an already-running `diskutil` format to finish before
 stopping; interrupting partition creation is not safe.
 
@@ -106,6 +112,21 @@ boot test is still required. Existing drive identity checks and erase
 confirmation remain mandatory. Raw/DD/BIOS operations keep the separate
 administrator-authorization path; authorization does not bypass macOS privacy
 or device-security restrictions.
+
+### Bundled NTFS on macOS and Linux
+
+NTFS is available in the existing filesystem selector. Rustfus uses bundled
+NTFS-3G tools to format and populate a private filesystem image, verifies its
+files, then writes it into the verified USB partition. This does not mount NTFS,
+install a driver, or require macFUSE. Windows UEFI jobs retain the UEFI:NTFS
+helper partition. Physical USB boot validation is still required.
+
+This approach needs temporary space for the whole NTFS partition image plus
+the extracted ISO files and 256 MiB of headroom. It writes the entire partition
+image, so even Quick format is not a quick mounted-volume copy. Source staging,
+tool errors and insufficient space are reported before disk erasure. Linux's
+special Syslinux-on-NTFS BIOS path still uses system mkfs/mount utilities and
+sector mapping; it is not covered by the FUSE-free bundled path.
 
 ## Command line
 

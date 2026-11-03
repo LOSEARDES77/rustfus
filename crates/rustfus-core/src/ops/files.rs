@@ -9,10 +9,10 @@ use md5::{Digest, Md5};
 use std::fs::File;
 use std::io::{self, Cursor, Read, Write};
 use std::path::PathBuf;
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 use std::path::{Component, Path};
 
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 use std::os::unix::{
     fs::OpenOptionsExt,
     io::{AsRawFd, FromRawFd},
@@ -22,7 +22,7 @@ use std::os::unix::{
 pub(super) enum Dest<'a, T: fatfs::ReadWriteSeek> {
     Fat(&'a fatfs::FileSystem<T>),
     Dir(PathBuf),
-    #[cfg(any(target_os = "macos", all(test, unix)))]
+    #[cfg(unix)]
     GuardedDir(&'a MountedDir<'a>),
 }
 
@@ -33,14 +33,14 @@ pub(super) type DirDest = Dest<'static, Cursor<Vec<u8>>>;
 /// The callback is checked before every filesystem operation.  On Unix, child
 /// paths are opened relative to the retained root descriptor and symlinks are
 /// rejected, avoiding path races through the mount tree.
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 pub(super) struct MountedDir<'a> {
     guard: &'a dyn Fn() -> Result<(), String>,
     #[cfg(unix)]
     fd: File,
 }
 
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 impl<'a> MountedDir<'a> {
     pub(super) fn open(
         root: PathBuf,
@@ -193,13 +193,13 @@ impl<'a> MountedDir<'a> {
     }
 }
 
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 struct GuardedWriter<'a> {
     file: File,
     guard: &'a dyn Fn() -> Result<(), String>,
 }
 
-#[cfg(any(target_os = "macos", all(test, unix)))]
+#[cfg(unix)]
 impl Write for GuardedWriter<'_> {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         (self.guard)().map_err(io::Error::other)?;
@@ -219,7 +219,7 @@ impl<T: fatfs::ReadWriteSeek> Dest<'_, T> {
         match self {
             Dest::Fat(fs) => fs.root_dir().create_dir(p).map(|_| ()),
             Dest::Dir(root) => std::fs::create_dir_all(root.join(p)),
-            #[cfg(any(target_os = "macos", all(test, unix)))]
+            #[cfg(unix)]
             Dest::GuardedDir(dir) => dir.mkdir(p),
         }
     }
@@ -232,7 +232,7 @@ impl<T: fatfs::ReadWriteSeek> Dest<'_, T> {
                 Ok(Box::new(f))
             }
             Dest::Dir(root) => Ok(Box::new(File::create(root.join(p))?)),
-            #[cfg(any(target_os = "macos", all(test, unix)))]
+            #[cfg(unix)]
             Dest::GuardedDir(dir) => Ok(Box::new(GuardedWriter {
                 file: dir.create(p)?,
                 guard: dir.guard,

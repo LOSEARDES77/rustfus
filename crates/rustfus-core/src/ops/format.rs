@@ -3,7 +3,7 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! ISO mode / plain format onto FAT, ext or an OS-created filesystem.
 
-use super::files::{Dest, DirDest, copy_files};
+use super::files::{Dest, DirDest, copy_files, copy_files_replacing};
 use super::layout::{ext_kind, fat_label, layout, write_tables, zero_range};
 use super::{
     Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze_file, e, open_dev, open_image,
@@ -15,7 +15,10 @@ use std::fs::File;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::Path;
 
+type Replacement<'a> = Option<(&'a str, &'a [(String, std::path::PathBuf)])>;
+
 /// FAT/FAT32 path: Rustfus formats and fills the partition itself.
+#[cfg(test)]
 pub(super) fn write_fat(
     job: &Job,
     rep: &Report,
@@ -24,6 +27,20 @@ pub(super) fn write_fat(
     main: &part::Part,
     dev: &File,
     ctx: &Ctx,
+) -> Result<(), String> {
+    write_fat_replacing(job, rep, iso, sl, main, dev, ctx, None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_fat_replacing(
+    job: &Job,
+    rep: &Report,
+    iso: Option<&iso::Iso>,
+    sl: Option<&syslinux::Info>,
+    main: &part::Part,
+    dev: &File,
+    ctx: &Ctx,
+    replacement: Replacement<'_>,
 ) -> Result<(), String> {
     ctx.progress(0.0, format!("Formatting ({})...", job.fs.name()));
     let mut vol = BlockDev::new(dev, main.start, main.size);
@@ -41,7 +58,7 @@ pub(super) fn write_fat(
     {
         let fat = fatfs::FileSystem::new(&mut vol, fatfs::FsOptions::new()).map_err(e)?;
         let dest = Dest::Fat(&fat);
-        copy_files(job, rep, iso, &dest, ctx)?;
+        copy_files_replacing(job, rep, iso, &dest, replacement, ctx)?;
         if let (Some(iso), Some(sl)) = (iso, sl) {
             for (path, data) in syslinux::extra_files(iso, sl, &job.replace_c32, &|m| ctx.log(m))? {
                 dest.put(&path, &data).map_err(e)?;
@@ -144,7 +161,28 @@ pub(super) fn write_fs(job: &Job, pinned: Option<&File>, ctx: &Ctx) -> Result<St
         _ => (None, Report::default()),
     };
     let fs = job.fs;
-    if fs.is_fat() && rep.large_file {
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let staged_wim = if fs == Fs::Fat32 && rep.windows && rep.large_file {
+        let iso = iso.as_ref().ok_or("Select a Windows ISO")?;
+        let entries = iso.entries().map_err(e)?;
+        let large: Vec<_> = entries
+            .iter()
+            .filter(|entry| !entry.is_dir && entry.size > super::FAT_MAX_FILE)
+            .collect();
+        if large.len() != 1 || !large[0].path.eq_ignore_ascii_case("sources/install.wim") {
+            return Err("FAT32 can split sources/install.wim only; use NTFS for oversized ESD or other files. No disk was erased.".into());
+        }
+        Some(super::wim::stage_wim(iso, large[0], ctx)?)
+    } else {
+        None
+    };
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let replacement = staged_wim
+        .as_ref()
+        .map(|staged| (staged.original.as_str(), staged.files.as_slice()));
+    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    let replacement: Replacement<'_> = None;
+    if fs.is_fat() && rep.large_file && replacement.is_none() {
         return Err("This image contains a file larger than 4 GB, which FAT32 cannot store. Use NTFS or exFAT.".into());
     }
     if !fs.supported() {
@@ -157,6 +195,7 @@ pub(super) fn write_fs(job: &Job, pinned: Option<&File>, ctx: &Ctx) -> Result<St
     }
     // Ext is formatted by Rustfus itself; the others need the OS tool.
     if ext_kind(fs).is_none()
+        && !(cfg!(unix) && fs == Fs::Ntfs)
         && let Some(tool) = fsos::missing_tool(fs)
     {
         return Err(format!(
@@ -173,16 +212,32 @@ pub(super) fn write_fs(job: &Job, pinned: Option<&File>, ctx: &Ctx) -> Result<St
         job.target,
         iso.as_ref().and_then(syslinux::detect),
     )?;
+    #[cfg(target_os = "linux")]
+    if fs == Fs::Ntfs && sl.is_some() {
+        if let Some(tool) = fsos::missing_tool(fs) {
+            return Err(format!("Syslinux on NTFS needs {tool}; no disk was erased"));
+        }
+        fsos::preflight_ntfs_mount()?;
+    }
     if let Some(sl) = &sl {
         ctx.log(format!("Syslinux {}{} detected", sl.version, sl.ext));
         // Fetch a non-embedded loader now so a download failure leaves the drive untouched.
         syslinux::loader(sl, job.allow_downloads, &|m| ctx.log(m))?;
     }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if fs == Fs::Ntfs && sl.is_none() {
+        return super::ntfs::run(job, &rep, iso.as_ref(), ctx);
+    }
     let parts = layout(
         job,
         !fs.is_fat() && iso.is_some() && job.target != Target::Bios,
     );
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    if let (Some(staged), Some(source)) = (&staged_wim, &iso) {
+        super::wim::validate_fat_capacity(source, staged, parts[0].size)?;
+    }
 
+    ctx.bad_blocks(job)?;
     ctx.progress(0.0, "Unmounting...");
     let dev = ctx.open_unmounted(&job.drive)?;
     if !job.quick {
@@ -208,8 +263,17 @@ pub(super) fn write_fs(job: &Job, pinned: Option<&File>, ctx: &Ctx) -> Result<St
 
     let needs_files = iso.is_some() || job.ext_label || job.boot == Boot::FreeDos;
     if fs.is_fat() {
-        write_fat(job, &rep, iso.as_ref(), sl.as_ref(), &parts[0], &dev, ctx)
-            .map_err(|error| format!("Formatting/copying FAT on {}: {error}", job.drive.path))?;
+        write_fat_replacing(
+            job,
+            &rep,
+            iso.as_ref(),
+            sl.as_ref(),
+            &parts[0],
+            &dev,
+            ctx,
+            replacement,
+        )
+        .map_err(|error| format!("Formatting/copying FAT on {}: {error}", job.drive.path))?;
     } else if let Some(kind) = ext_kind(fs) {
         if needs_files && !cfg!(target_os = "linux") {
             return Err(format!(

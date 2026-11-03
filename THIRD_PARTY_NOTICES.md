@@ -76,6 +76,28 @@ automatically: it downloads every archive listed in
 as `rustfus-<version>-third-party-sources.tar`. If you change a file in
 `res/`, update `res/SOURCES.txt` to match.
 
+## Native helper executables built from bundled source
+
+On macOS and Linux, Rustfus embeds `mkntfs`, `wimlib-imagex` and the app-owned
+`ntfs-import` helper. They are separate executables, not libraries linked into
+the Rust application. The NTFS helpers link libntfs-3g statically; wimlib-imagex
+links libwim statically. Only operating-system runtime libraries remain dynamic.
+
+| Source | Pinned release and commit | License and notices |
+| --- | --- | --- |
+| [ntfs-3g](https://github.com/tuxera/ntfs-3g) | 2026.9.28, `7f0f841fc52cf719106c5c93bafe465004e36816` | GPL-2.0-or-later for the library and utilities; see `vendor/ntfs-3g/COPYING`, `COPYING.LIB`, `AUTHORS` and per-file copyright notices. Copyright Tuxera Inc. and contributing NTFS-3G developers. |
+| [wimlib](https://github.com/ebiggers/wimlib) | v1.14.5, `cd5e231c348c255ae5088873b5a66ee0eb96fa07` | wimlib-imagex GPL-3.0-or-later; libwim LGPL-2.1-or-later, with additional permissively licensed components. See `vendor/wimlib/COPYING`, `COPYING.GPLv3`, `COPYING.LGPL` and per-file notices. Copyright Eric Biggers and contributors. |
+
+The Rustfus-owned NTFS import glue is GPL-3.0-or-later. No FUSE driver, macOS
+kernel extension or externally installed NTFS/WIM library is distributed or
+required. Windows does not embed these helpers.
+
+The release source asset includes a committed Rustfus source archive with the
+complete pinned submodule trees, upstream license files, glue and build scripts.
+See [native tool build and source packaging](docs/native-tools.md) and
+`packaging/native/pins.json` for reproduction details. This is in addition to
+the existing source archives for resources in `res/`.
+
 ## Downloaded at runtime (not distributed)
 
 | What                                                             | From                                                                                                                                         | License                                              |

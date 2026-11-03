@@ -25,6 +25,28 @@ mod imp {
         }
     }
 
+    pub fn preflight_ntfs_mount() -> Result<(), String> {
+        let path = std::env::var_os("PATH").unwrap_or_default();
+        let fuse = std::env::split_paths(&path)
+            .chain(["/sbin".into(), "/usr/sbin".into()])
+            .any(|dir| dir.join("ntfs-3g").is_file());
+        let loaded = std::fs::read_to_string("/proc/filesystems")
+            .is_ok_and(|contents| contents.split_whitespace().any(|name| name == "ntfs3"));
+        let kernel = run("uname", &["-r"])?;
+        let modules = PathBuf::from("/lib/modules")
+            .join(kernel.trim())
+            .join("kernel/fs/ntfs3");
+        let available = std::fs::read_dir(modules).is_ok_and(|entries| {
+            entries
+                .flatten()
+                .any(|entry| entry.file_name().to_string_lossy().starts_with("ntfs3.ko"))
+        });
+        if !fuse && !loaded && !available {
+            return Err("Syslinux on NTFS requires the Linux ntfs3 driver or an external ntfs-3g mount tool; use FAT32. No disk was erased.".into());
+        }
+        Ok(())
+    }
+
     pub fn rescan(d: &Drive) -> Result<(), String> {
         run("blockdev", &["--rereadpt", &d.path]).or_else(|_| run("partprobe", &[&d.path]))?;
         run("udevadm", &["settle"]).ok();

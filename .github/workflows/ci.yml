@@ -23,12 +23,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
       - uses: Swatinem/rust-cache@v2
       - name: Install Linux GUI build dependencies
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
       - run: cargo fmt --all --check
       - name: Clippy (Linux)
         run: cargo clippy --locked --workspace --all-targets -- -D warnings
@@ -48,12 +50,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
       - if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
+      - if: runner.os == 'macOS'
+        run: brew install autoconf automake libtool pkg-config
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # Windows uses its built-in powershell.exe.
       - if: runner.os == 'Linux'
@@ -67,7 +73,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@1.95
       - uses: Swatinem/rust-cache@v2
-      - run: sudo apt-get update && sudo apt-get install -y pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
+      - run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
       - run: cargo check --locked --workspace
