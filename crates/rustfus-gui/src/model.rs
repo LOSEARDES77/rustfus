@@ -410,7 +410,11 @@ impl Model {
                 self.dd = !r.is_iso;
                 if r.is_iso {
                     self.label = r.label.clone();
-                    self.fs = r.default_fs();
+                    self.fs = if cfg!(target_os = "macos") && r.windows && r.efi {
+                        Fs::Fat32
+                    } else {
+                        r.default_fs()
+                    };
                     (self.scheme, self.target) = r.default_layout();
                 }
                 self.cluster = 0;
@@ -579,7 +583,15 @@ impl Model {
             job.label
         ));
         #[cfg(target_os = "macos")]
-        self.spawn(move |tx, c| rustfus_core::macos_auth::run_job(&job, tx, c));
+        let native_macos = rustfus_core::ops::macos::supports(&job, &self.report);
+        #[cfg(target_os = "macos")]
+        self.spawn(move |tx, c| {
+            if native_macos {
+                ops::run_job(&job, tx, c)
+            } else {
+                rustfus_core::macos_auth::run_job(&job, tx, c)
+            }
+        });
         #[cfg(not(target_os = "macos"))]
         self.spawn(move |tx, c| ops::run_job(&job, tx, c));
     }

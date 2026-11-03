@@ -3,7 +3,7 @@
 // Based on Rufus, Copyright © 2011-2026 Pete Batard <pete@akeo.ie> (GPL-3.0-or-later).
 //! DD-mode writes: raw image copy to the device and read-back verification.
 
-use super::{CHUNK, Ctx, SECTOR, e, open_dev, raw_path, unmount};
+use super::{CHUNK, Ctx, SECTOR, e, raw_path, unmount};
 use crate::blockdev::{read_at, write_at};
 use crate::drives::{Drive, human};
 use crate::image;
@@ -32,7 +32,8 @@ pub(super) fn write_dd(img: &Path, d: &Drive, verify: bool, ctx: &Ctx) -> Result
         image::apply_ffu(img, &raw_path(d)).map_err(e)?;
         return Ok(format!("Applied {} to {}", img.display(), d.path));
     }
-    let src = image::open(img).map_err(e)?;
+    let src = image::open(img)
+        .map_err(|error| format!("Opening source image {}: {error}", img.display()))?;
     if let Some(size) = src.size.filter(|&s| s > d.size) {
         return Err(format!(
             "Image ({}) is larger than the drive ({})",
@@ -41,12 +42,19 @@ pub(super) fn write_dd(img: &Path, d: &Drive, verify: bool, ctx: &Ctx) -> Result
         ));
     }
     ctx.progress(0.0, "Unmounting...");
-    unmount(d)?;
-    let dev = open_dev(d)?;
-    let written = copy(src, &dev, d.size, ctx)?;
+    let dev = ctx.open_unmounted(d)?;
+    let written = copy(src, &dev, d.size, ctx)
+        .map_err(|error| format!("Raw image write to {}: {error}", raw_path(d)))?;
     if verify {
         image::drop_cache(&dev);
-        verify_dev(image::open(img).map_err(e)?, &dev, written, ctx)?;
+        verify_dev(
+            image::open(img)
+                .map_err(|error| format!("Reopening source image {}: {error}", img.display()))?,
+            &dev,
+            written,
+            ctx,
+        )
+        .map_err(|error| format!("Verifying raw image on {}: {error}", raw_path(d)))?;
     }
     Ok(format!("Wrote {} to {}", human(written), d.path))
 }
@@ -71,13 +79,15 @@ pub(super) fn copy(
             return Err("Image is larger than the drive".into());
         }
         buf[n..len].fill(0);
-        write_at(dev, &buf[..len], done).map_err(e)?;
+        write_at(dev, &buf[..len], done)
+            .map_err(|error| format!("Writing byte {done}: {error}"))?;
         done += n as u64;
         let pct = src.consumed.load(Ordering::Relaxed) as f32 / src.total.max(1) as f32;
         ctx.progress(pct, format!("Writing image: {:.1}%", pct * 100.0));
     }
     ctx.progress(1.0, "Flushing...");
-    dev.sync_all().map_err(e)?;
+    dev.sync_all()
+        .map_err(|error| format!("Flushing raw image data: {error}"))?;
     Ok(done)
 }
 
@@ -96,7 +106,8 @@ pub(super) fn verify_dev(
             break;
         }
         let len = n.next_multiple_of(SECTOR);
-        read_at(dev, &mut back[..len], checked).map_err(e)?;
+        read_at(dev, &mut back[..len], checked)
+            .map_err(|error| format!("Reading back byte {checked}: {error}"))?;
         if buf[..n] != back[..n] {
             return Err(format!("Verification failed near byte {checked}"));
         }

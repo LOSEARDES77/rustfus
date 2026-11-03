@@ -370,7 +370,10 @@ impl RustfusView {
             cx,
         );
         let big = m.drive().is_some_and(|d| d.size > 4 << 30);
-        let default_fs = if m.report.large_file && m.image_mode() {
+        let default_fs = if m.report.large_file
+            && m.image_mode()
+            && !(cfg!(target_os = "macos") && m.report.windows && m.report.efi)
+        {
             Fs::Ntfs
         } else {
             Fs::Fat32

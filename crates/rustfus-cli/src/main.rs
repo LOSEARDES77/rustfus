@@ -5,6 +5,8 @@
 
 mod args;
 mod commands;
+#[cfg(any(windows, test))]
+mod elevation;
 
 use clap::Parser;
 use std::process::ExitCode;
@@ -42,6 +44,15 @@ fn main() -> ExitCode {
     }
     // No arguments: the GUI, as launched from the menu entry.
     if std::env::args_os().len() <= 1 {
+        #[cfg(windows)]
+        match elevation::ensure(true) {
+            Ok(Some(code)) => std::process::exit(code as i32),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
         return match rustfus_gui::run() {
             Ok(()) => ExitCode::SUCCESS,
             Err(e) => {
@@ -52,7 +63,19 @@ fn main() -> ExitCode {
     }
     #[cfg(windows)]
     attach_console();
-    match commands::run(args::Cli::parse().cmd) {
+    let command = args::Cli::parse().cmd;
+    #[cfg(windows)]
+    if matches!(&command, args::Cmd::Write(_) | args::Cmd::Save { .. }) {
+        match elevation::ensure(false) {
+            Ok(Some(code)) => std::process::exit(code as i32),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("error: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    match commands::run(command) {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");

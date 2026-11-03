@@ -13,7 +13,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow = "1"
-# Kit's published Fast backend lets Rustfus own the Windows UAC manifest.
+# Use Kit's published Fast backend; Windows elevation is requested by the CLI host.
 gpui-kit = { version = "=0.8.1", default-features = false, features = ["component", "gpui-fast"] }
 rustfus-core.workspace = true
 

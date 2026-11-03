@@ -17,6 +17,8 @@ mod dd;
 mod files;
 mod format;
 mod layout;
+#[cfg(target_os = "macos")]
+pub mod macos;
 #[cfg(test)]
 #[path = "../../tests/unit/ops.rs"]
 mod tests;
@@ -478,7 +480,7 @@ impl Ctx<'_> {
     fn open_unmounted(&self, drive: &Drive) -> Result<File, String> {
         self.check()?;
         self.log(format!("Verifying and unmounting {}", drive.path));
-        unmount(drive)?;
+        unmount(drive).map_err(|error| format!("Verifying/unmounting {}: {error}", drive.path))?;
         self.log(format!(
             "Unmount complete; opening {} for disk access",
             raw_path(drive)
@@ -504,6 +506,23 @@ impl Ctx<'_> {
 }
 
 pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    if matches!(job.boot, Boot::Image(_))
+        && !job.dd
+        && job.fs == Fs::Fat32
+        && job.scheme == Scheme::Gpt
+        && job.target == Target::Uefi
+        && job.wtg.is_none()
+        && macos::supports(
+            job,
+            &match &job.boot {
+                Boot::Image(path) => analyze(path)?,
+                _ => unreachable!(),
+            },
+        )
+    {
+        return macos::run(job, tx, cancel);
+    }
     let ctx = Ctx { tx, cancel };
     ctx.log(format!("Target: {}", job.drive.label()));
     if let Some(passes) = job.bad_blocks {

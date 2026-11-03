@@ -77,6 +77,33 @@ The main form has no page or card scrolling. Its window fits the measured
 content as options expand or collapse; tall forms use side-by-side cards on
 wider displays and compact spacing when needed. Menus and log text can scroll.
 
+### macOS disk writing: verification status
+
+**The current raw-disk backend has reported physical-USB failures on macOS**
+(`Operation not permitted` and `Inappropriate ioctl for device`). The exact
+cause of those user reports has not been reproduced; do not treat raw Linux
+ISO/DD writing as verified on macOS.
+
+Windows UEFI installation media now uses an OS-managed path: `/usr/sbin/diskutil`
+creates GPT/FAT32, then Rustfus copies files into the verified mounted volume
+without opening `/dev/rdisk*` or requesting root. macOS may still ask permission
+to manage removable storage. This path requires Quick format, default cluster
+size, and no persistence, bad-block test, or legacy BIOS options. It never
+falls back to raw writes after an error.
+
+For `sources/install.wim` larger than 4 GB, install `wimlib-imagex` with
+`brew install wimlib`. Rustfus stages and validates split `.swm` files **before
+any erase**. Oversized `install.esd` and other oversized files are rejected.
+Cancellation waits for an already-running `diskutil` format to finish before
+stopping; interrupting partition creation is not safe.
+
+The new mounted path is covered by mocked disk operations and a disposable
+FAT32 disk-image write/flush test. A complete physical-USB creation and Windows
+boot test is still required. Existing drive identity checks and erase
+confirmation remain mandatory. Raw/DD/BIOS operations keep the separate
+administrator-authorization path; authorization does not bypass macOS privacy
+or device-security restrictions.
+
 ## Command line
 
 Run `rustfus` without arguments for the GUI, or with a command:
@@ -106,7 +133,7 @@ Download from the [Releases](../../releases) page:
 | System | File | Notes |
 |---|---|---|
 | Windows (x86_64 / ARM64) | `Rustfus-<version>-windows-<arch>.exe` | Portable, asks for Administrator rights (UAC) at launch |
-| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Rustfus asks for administrator authorization when a disk write starts. |
+| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Windows UEFI media uses macOS storage management; raw operations request administrator authorization. See the macOS verification status above. |
 | Debian, Ubuntu, Mint… | `rustfus_<version>-1_<arch>.deb` | `sudo apt install ./rustfus_*.deb` |
 | Fedora, openSUSE, RHEL… | `rustfus-<version>-1.<arch>.rpm` | `sudo dnf install ./rustfus-*.rpm` |
 | Arch, Manjaro, CachyOS… | `rustfus-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U rustfus-*.pkg.tar.zst` |

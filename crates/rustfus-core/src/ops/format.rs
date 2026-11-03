@@ -125,7 +125,13 @@ fn stage_syslinux(
 /// ISO mode / format: partition, create the filesystem, copy files, install boot code.
 pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     let (iso, rep) = match &job.boot {
-        Boot::Image(p) => (Some(iso::Iso::open(p).map_err(e)?), analyze(p)?),
+        Boot::Image(p) => (
+            Some(
+                iso::Iso::open(p)
+                    .map_err(|error| format!("Opening ISO {}: {error}", p.display()))?,
+            ),
+            analyze(p)?,
+        ),
         _ => (None, Report::default()),
     };
     let fs = job.fs;
@@ -180,14 +186,21 @@ pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
     }
     // Clear stale filesystem signatures at the start of every partition.
     for p in &parts {
-        zero_range(&dev, p.start, p.size.min(MB), None)?;
+        zero_range(&dev, p.start, p.size.min(MB), None).map_err(|error| {
+            format!(
+                "Clearing partition signatures on {}: {error}",
+                job.drive.path
+            )
+        })?;
     }
     ctx.progress(0.0, format!("Partitioning ({:?})...", job.scheme));
-    write_tables(job, &rep, sl.as_ref(), &parts, &dev, ctx)?;
+    write_tables(job, &rep, sl.as_ref(), &parts, &dev, ctx)
+        .map_err(|error| format!("Writing partition map on {}: {error}", job.drive.path))?;
 
     let needs_files = iso.is_some() || job.ext_label || job.boot == Boot::FreeDos;
     if fs.is_fat() {
-        write_fat(job, &rep, iso.as_ref(), sl.as_ref(), &parts[0], &dev, ctx)?;
+        write_fat(job, &rep, iso.as_ref(), sl.as_ref(), &parts[0], &dev, ctx)
+            .map_err(|error| format!("Formatting/copying FAT on {}: {error}", job.drive.path))?;
     } else if let Some(kind) = ext_kind(fs) {
         if needs_files && !cfg!(target_os = "linux") {
             return Err(format!(

@@ -447,18 +447,22 @@ pub fn worker(socket: &Path, token: &str, uid: u32) -> Result<(), String> {
     .map_err(error)?;
     let mut request: Request = receive(&mut stream).map_err(error)?;
     let image = if matches!(request.job.boot, Boot::Image(_)) {
-        Some(receive_image(&stream).map_err(error)?)
+        Some(
+            receive_image(&stream)
+                .map_err(|e| format!("Receiving selected image descriptor: {e}"))?,
+        )
     } else {
         None
     };
     let private = tempfile::Builder::new()
         .prefix("rustfus-worker-")
         .tempdir_in("/private/tmp")
-        .map_err(error)?;
+        .map_err(|e| format!("Creating private disk-worker workspace: {e}"))?;
     let home = private.path().join("home");
     let temporary = private.path().join("tmp");
-    fs::create_dir(&home).map_err(error)?;
-    fs::create_dir(&temporary).map_err(error)?;
+    fs::create_dir(&home).map_err(|e| format!("Creating private worker home: {e}"))?;
+    fs::create_dir(&temporary)
+        .map_err(|e| format!("Creating private worker temporary directory: {e}"))?;
     if let (Some(image), Boot::Image(path)) = (&image, &mut request.job.boot) {
         let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("img");
         if !extension.bytes().all(|c| c.is_ascii_alphanumeric()) {
@@ -466,7 +470,7 @@ pub fn worker(socket: &Path, token: &str, uid: u32) -> Result<(), String> {
         }
         let pinned = private.path().join(format!("image.{extension}"));
         std::os::unix::fs::symlink(format!("/dev/fd/{}", image.as_raw_fd()), &pinned)
-            .map_err(error)?;
+            .map_err(|e| format!("Pinning selected image descriptor: {e}"))?;
         *path = pinned;
     }
     // Never inherit user-controlled executable search paths in the root worker.
@@ -536,6 +540,38 @@ fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn transferred_image_is_read_only_and_pinned_when_the_path_is_replaced() {
+        use std::io::Seek;
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("image.iso");
+        fs::write(&path, b"original image bytes").unwrap();
+        let original = File::open(&path).unwrap();
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        send_image(&sender, &original).unwrap();
+        fs::rename(&path, directory.path().join("old.iso")).unwrap();
+        fs::write(&path, b"replacement bytes").unwrap();
+        let received = receive_image(&receiver).unwrap();
+        let alias = directory.path().join("pinned.iso");
+        std::os::unix::fs::symlink(format!("/dev/fd/{}", received.as_raw_fd()), &alias).unwrap();
+        let mut reopened =
+            File::open(&alias).expect("reopen the pinned descriptor through its image alias");
+        let mut bytes = Vec::new();
+        reopened.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"original image bytes");
+        reopened.rewind().unwrap();
+        assert!(reopened.write_all(b"changed").is_err());
+        assert_eq!(fs::read(&path).unwrap(), b"replacement bytes");
+    }
+
+    #[test]
+    fn image_handoff_rejects_a_writable_descriptor() {
+        let file = tempfile::tempfile().unwrap();
+        let (sender, receiver) = UnixStream::pair().unwrap();
+        send_image(&sender, &file).unwrap();
+        assert!(receive_image(&receiver).is_err());
+    }
 
     #[test]
     fn root_eperm_is_explained_as_privacy_or_device_security() {

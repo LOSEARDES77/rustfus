@@ -33,4 +33,5 @@ libc = "0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 libc = "0.2"
+plist = "1.8"
 tempfile = "3.27.0"
