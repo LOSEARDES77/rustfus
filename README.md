@@ -80,9 +80,12 @@ wider displays and compact spacing when needed. Menus and log text can scroll.
 ### macOS disk writing: verification status
 
 **The current raw-disk backend has reported physical-USB failures on macOS**
-(`Operation not permitted` and `Inappropriate ioctl for device`). The exact
-cause of those user reports has not been reproduced; do not treat raw Linux
-ISO/DD writing as verified on macOS.
+(`Operation not permitted` and `Inappropriate ioctl for device`). The flush
+failure was reproduced on a disposable raw disk-image device: Rust's
+`sync_all()` uses `F_FULLFSYNC`, which is not supported on that descriptor.
+Raw devices now use `DKIOCSYNCHRONIZECACHE`, with failures still reported.
+Complete physical-USB creation and boot remain unverified; do not treat raw
+Linux ISO/DD writing as verified on macOS. Privacy denials remain separate.
 
 Windows UEFI installation media now uses an OS-managed path: `/usr/sbin/diskutil`
 creates GPT/FAT32, then Rustfus copies files into the verified mounted volume

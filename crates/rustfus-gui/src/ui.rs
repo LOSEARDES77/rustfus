@@ -119,8 +119,6 @@ pub(crate) struct RustfusView {
     persistence_max: u64,
     theme: Option<ThemeMode>,
     blur: bool,
-    columns: bool,
-    compact: bool,
     last_fit: Option<Size<Pixels>>,
     downloader: Option<AnyWindowHandle>,
     checksums: Option<(PathBuf, AnyWindowHandle)>,
@@ -197,8 +195,6 @@ impl RustfusView {
             persistence_max: 0,
             theme: None,
             blur: crate::backdrop::SUPPORTED,
-            columns: false,
-            compact: false,
             last_fit: None,
             downloader: None,
             checksums: None,
@@ -223,7 +219,7 @@ impl RustfusView {
         }
         let viewport = window.viewport_size();
         let measured_width = f32::from(measured.width);
-        let expected_width = f32::from(viewport.width).min(if self.columns { 1200. } else { 960. });
+        let expected_width = f32::from(viewport.width).min(960.);
         if (measured_width - expected_width).abs() > 2. {
             return;
         }
@@ -233,18 +229,9 @@ impl RustfusView {
             .unwrap_or(viewport);
         let fit = fit_form(
             f32::from(measured.height),
-            self.last_fit
-                .map_or(f32::from(viewport.width), |size| f32::from(size.width)),
-            f32::from(available.width),
+            f32::from(viewport.width),
             f32::from(available.height),
-            self.columns,
-            self.compact,
         );
-        if self.columns != fit.columns || self.compact != fit.compact {
-            self.columns = fit.columns;
-            self.compact = fit.compact;
-            cx.notify();
-        }
         let target = size(px(fit.width), px(fit.height));
         if self.last_fit != Some(target)
             && ((f32::from(viewport.height - target.height)).abs() > 1.
@@ -685,7 +672,7 @@ impl Render for RustfusView {
                 let _ = cx;
                 menu
             });
-        let mut drive = section_card("drive-properties", self.blur, self.compact, cx)
+        let mut drive = section_card("drive-properties", self.blur, cx)
             .child(
                 div()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -744,16 +731,6 @@ impl Render for RustfusView {
                     )
                     .child(source),
             );
-        if m.iso_mode() && m.report.windows {
-            drive = drive.child(self.select(IMAGE_OPTION, t("IDS_IMAGE_OPTION_TXT"), busy, cx));
-            if !cfg!(windows) {
-                drive = drive.child(
-                    div()
-                        .text_sm()
-                        .child("Windows To Go requires DISM and bcdboot on Windows."),
-                );
-            }
-        }
         if m.iso_mode() && m.report.persistence_capable() {
             drive = drive.child(
                 div()
@@ -841,7 +818,7 @@ impl Render for RustfusView {
                     cx,
                 ));
         }
-        let mut format = section_card("format-options", self.blur, self.compact, cx)
+        let mut format = section_card("format-options", self.blur, cx)
             .child(
                 div()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -919,11 +896,11 @@ impl Render for RustfusView {
         }
         let body = div()
             .flex()
-            .when(!self.columns, |this| this.flex_col())
+            .flex_col()
             .flex_shrink_0()
             .gap_3()
-            .child(div().flex_1().min_w_0().child(drive))
-            .child(div().flex_1().min_w_0().child(format));
+            .child(div().w_full().min_w_0().flex_shrink_0().child(drive))
+            .child(div().w_full().min_w_0().flex_shrink_0().child(format));
         let language_weak = weak.clone();
         let language = Button::new("language")
             .icon(icon("language"))
@@ -1127,7 +1104,7 @@ impl Render for RustfusView {
             .map(|s| s.elapsed())
             .unwrap_or(m.elapsed)
             .as_secs();
-        let status_card = section_card("status", self.blur, self.compact, cx)
+        let status_card = section_card("status", self.blur, cx)
             .child(
                 div()
                     .font_weight(gpui_kit::FontWeight::SEMIBOLD)
@@ -1195,7 +1172,7 @@ impl Render for RustfusView {
             .flex_col()
             .w_full()
             .flex_shrink_0()
-            .max_w(px(if self.columns { 1200. } else { 960. }))
+            .max_w(px(960.))
             .min_w_0()
             .p_3()
             .gap_3()
@@ -1253,9 +1230,12 @@ impl Render for RustfusView {
                 div()
                     .id("main-page")
                     .w_full()
-                    .flex_none()
+                    .flex_1()
+                    .min_h_0()
                     .flex()
+                    .items_start()
                     .justify_center()
+                    .overflow_y_scroll()
                     .child(view.on_prepaint({
                         let weak = cx.entity().downgrade();
                         move |bounds, window, cx| {
@@ -1282,15 +1262,15 @@ impl Render for RustfusView {
     }
 }
 
-fn section_card(id: &'static str, blur: bool, compact: bool, cx: &App) -> GroupBox {
+fn section_card(id: &'static str, blur: bool, cx: &App) -> GroupBox {
     GroupBox::new().id(id).fill().flex_shrink_0().content_style(
         StyleRefinement::default()
             .bg(crate::backdrop::card_surface(cx.theme().group_box, blur))
             .border_1()
             .border_color(cx.theme().border)
             .rounded(px(12.))
-            .gap(px(if compact { 8. } else { 12. }))
-            .p(px(if compact { 8. } else { 12. })),
+            .gap(px(12.))
+            .p(px(12.)),
     )
 }
 
@@ -1298,26 +1278,14 @@ fn section_card(id: &'static str, blur: bool, compact: bool, cx: &App) -> GroupB
 struct FormFit {
     width: f32,
     height: f32,
-    columns: bool,
-    compact: bool,
 }
 
-fn fit_form(
-    content: f32,
-    width: f32,
-    screen_width: f32,
-    screen_height: f32,
-    columns: bool,
-    compact: bool,
-) -> FormFit {
+fn fit_form(content: f32, width: f32, screen_height: f32) -> FormFit {
     let max_height = (screen_height - 16.).max(320.);
     let desired = content.ceil() + TITLEBAR_HEIGHT + 2.;
-    let widen = desired > max_height && !columns && screen_width >= 1040.;
     FormFit {
-        width: if widen { 1040. } else { width },
+        width,
         height: desired.min(max_height).max(480.).min(max_height),
-        columns: columns || widen,
-        compact: compact || (desired > max_height && !widen),
     }
 }
 
@@ -1384,25 +1352,57 @@ mod tests {
     use super::*;
     #[test]
     fn form_height_fits_the_measured_content() {
-        let collapsed = fit_form(640., 600., 1440., 1000., false, false);
+        let collapsed = fit_form(640., 600., 1000.);
         assert_eq!(collapsed.height, 690.);
-        assert!(!collapsed.columns);
-        let expanded = fit_form(830., 600., 1440., 1000., false, false);
+        let expanded = fit_form(830., 600., 1000.);
         assert_eq!(expanded.height, 880.);
-        let collapsed_again = fit_form(640., 600., 1440., 1000., false, false);
+        let collapsed_again = fit_form(640., 600., 1000.);
         assert_eq!(collapsed_again.height, collapsed.height);
     }
 
     #[test]
-    fn tall_forms_widen_before_using_compact_spacing() {
-        let wide = fit_form(980., 600., 1440., 900., false, false);
-        assert_eq!(wide.width, 1040.);
-        assert!(wide.columns);
-        assert!(!wide.compact);
-        assert!(wide.height <= 884.);
-        let compact = fit_form(980., 600., 900., 900., false, false);
-        assert!(compact.compact);
-        assert!(!compact.columns);
+    fn opening_and_closing_log_preserves_form_width() {
+        for width in [480., 600., 960., 1200.] {
+            for screen_height in [600., 900., 1440.] {
+                let closed = fit_form(640., width, screen_height);
+                let opened = fit_form(980., closed.width, screen_height);
+                assert_eq!(opened.width, width);
+                assert!(opened.height <= screen_height - 16.);
+                assert_eq!(fit_form(640., opened.width, screen_height), closed);
+            }
+        }
+    }
+
+    #[test]
+    fn main_form_does_not_render_image_options() {
+        let render = include_str!("ui.rs")
+            .split("impl Render for RustfusView")
+            .nth(1)
+            .unwrap()
+            .split("fn section_card")
+            .next()
+            .unwrap();
+        assert!(!render.contains("IMAGE_OPTION"));
+        assert!(!render.contains("IDS_IMAGE_OPTION_TXT"));
+    }
+
+    #[test]
+    fn scroll_container_keeps_intrinsic_form_height() {
+        let container = include_str!("ui.rs")
+            .split(".id(\"main-page\")")
+            .nth(1)
+            .unwrap()
+            .split(".child(view.on_prepaint")
+            .next()
+            .unwrap();
+        for required in [
+            ".flex_1()",
+            ".min_h_0()",
+            ".items_start()",
+            ".overflow_y_scroll()",
+        ] {
+            assert!(container.contains(required), "missing {required}");
+        }
     }
 
     #[test]

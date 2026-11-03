@@ -461,19 +461,26 @@ fn validate_split_paths<'a>(
     Ok(())
 }
 
-pub(super) fn run(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<String, String> {
+pub(super) fn run(
+    job: &Job,
+    pinned: Option<&File>,
+    tx: &Sender<Msg>,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
     let ctx = Ctx { tx, cancel };
     ctx.check()?;
     let Boot::Image(image) = &job.boot else {
         return Err("Select a Windows installation ISO".into());
     };
-    let iso = Iso::open(image).map_err(|e| {
+    let file = super::open_image(image, pinned)?;
+    let report = super::analyze_file(file.try_clone().map_err(super::e)?)
+        .map_err(|error| format!("Analyzing Windows ISO {}: {error}", image.display()))?;
+    let iso = Iso::from_file(file).map_err(|e| {
         format!(
             "Cannot read Windows ISO {}: {e}; no disk was erased",
             image.display()
         )
     })?;
-    let report = super::analyze(image)?;
     let entries = iso
         .entries()
         .map_err(|e| format!("Cannot list Windows ISO files: {e}; no disk was erased"))?;

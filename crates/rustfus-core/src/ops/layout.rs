@@ -181,5 +181,6 @@ pub(super) fn write_tables(
         disk.seek(SeekFrom::Start(p.start)).map_err(e)?;
         disk.write_all(UEFI_NTFS).map_err(e)?;
     }
-    disk.flush().map_err(e)
+    disk.flush()
+        .map_err(|error| format!("Flushing partition map: {error}"))
 }

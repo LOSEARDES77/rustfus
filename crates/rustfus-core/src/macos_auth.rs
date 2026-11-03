@@ -214,9 +214,9 @@ fn validate_job_shape(job: &Job) -> Result<(), String> {
         return Err("The selected disk has no reported capacity".into());
     }
     if let Boot::Image(path) = &job.boot
-        && (!path.is_absolute() || !path.is_file())
+        && !path.is_absolute()
     {
-        return Err("The selected image is no longer available".into());
+        return Err("The selected image must have an absolute path".into());
     }
     if !job.fs.supported() || job.wtg.is_some() {
         return Err("This write mode is not supported on macOS".into());
@@ -228,6 +228,7 @@ fn validate_authorized_job(job: &Job) -> Result<(), String> {
     validate_job_shape(job)?;
     // Only the authorized process opens the raw disk on macOS.
     drives::verify(&job.drive)
+        .map_err(|error| format!("Verifying authorized target {}: {error}", job.drive.path))
 }
 
 struct AuthorizationProcess(Child);
@@ -445,7 +446,7 @@ pub fn worker(socket: &Path, token: &str, uid: u32) -> Result<(), String> {
         },
     )
     .map_err(error)?;
-    let mut request: Request = receive(&mut stream).map_err(error)?;
+    let request: Request = receive(&mut stream).map_err(error)?;
     let image = if matches!(request.job.boot, Boot::Image(_)) {
         Some(
             receive_image(&stream)
@@ -463,16 +464,6 @@ pub fn worker(socket: &Path, token: &str, uid: u32) -> Result<(), String> {
     fs::create_dir(&home).map_err(|e| format!("Creating private worker home: {e}"))?;
     fs::create_dir(&temporary)
         .map_err(|e| format!("Creating private worker temporary directory: {e}"))?;
-    if let (Some(image), Boot::Image(path)) = (&image, &mut request.job.boot) {
-        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("img");
-        if !extension.bytes().all(|c| c.is_ascii_alphanumeric()) {
-            return Err("Invalid image extension".into());
-        }
-        let pinned = private.path().join(format!("image.{extension}"));
-        std::os::unix::fs::symlink(format!("/dev/fd/{}", image.as_raw_fd()), &pinned)
-            .map_err(|e| format!("Pinning selected image descriptor: {e}"))?;
-        *path = pinned;
-    }
     // Never inherit user-controlled executable search paths in the root worker.
     // SAFETY: main invokes this entry before creating any threads.
     unsafe {
@@ -484,10 +475,10 @@ pub fn worker(socket: &Path, token: &str, uid: u32) -> Result<(), String> {
     crate::loc::set_language(&request.language);
     stream.set_read_timeout(None).map_err(error)?;
     stream.set_write_timeout(None).map_err(error)?;
-    serve(request.job, stream)
+    serve(request.job, image, stream)
 }
 
-fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
+fn serve(job: Job, image: Option<File>, mut stream: UnixStream) -> Result<(), String> {
     let cancel = Arc::new(AtomicBool::new(false));
     let mut control = stream.try_clone().map_err(error)?;
     let monitor_cancel = cancel.clone();
@@ -509,11 +500,16 @@ fn serve(job: Job, mut stream: UnixStream) -> Result<(), String> {
                 if worker_cancel.load(Ordering::Relaxed) {
                     return Err(CANCELLED.into());
                 }
+                let _ = worker_tx.send(Msg::Log(format!(
+                    "Verifying authorized target {}",
+                    job.drive.path
+                )));
                 validate_authorized_job(&job)?;
+                let _ = worker_tx.send(Msg::Log("Authorized target verified".into()));
                 if worker_cancel.load(Ordering::Relaxed) {
                     return Err(CANCELLED.into());
                 }
-                ops::run_job(&job, &worker_tx, &worker_cancel)
+                ops::run_job_with_image(&job, image.as_ref(), &worker_tx, &worker_cancel)
             }))
             .unwrap_or_else(|_| Err("The disk worker stopped unexpectedly".into()));
             let _ = tx.send(Msg::Done(result));
@@ -553,16 +549,17 @@ mod tests {
         fs::rename(&path, directory.path().join("old.iso")).unwrap();
         fs::write(&path, b"replacement bytes").unwrap();
         let received = receive_image(&receiver).unwrap();
-        let alias = directory.path().join("pinned.iso");
-        std::os::unix::fs::symlink(format!("/dev/fd/{}", received.as_raw_fd()), &alias).unwrap();
-        let mut reopened =
-            File::open(&alias).expect("reopen the pinned descriptor through its image alias");
+        let mut reopened = received.try_clone().unwrap();
         let mut bytes = Vec::new();
         reopened.read_to_end(&mut bytes).unwrap();
         assert_eq!(bytes, b"original image bytes");
         reopened.rewind().unwrap();
         assert!(reopened.write_all(b"changed").is_err());
         assert_eq!(fs::read(&path).unwrap(), b"replacement bytes");
+        let mut source = crate::image::from_file(received, &path).unwrap();
+        let mut bytes = Vec::new();
+        source.reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, b"original image bytes");
     }
 
     #[test]

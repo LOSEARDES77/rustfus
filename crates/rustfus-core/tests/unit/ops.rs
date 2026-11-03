@@ -17,6 +17,81 @@ fn label_is_sanitized() {
     assert_eq!(sanitize_label("$()", Fs::Exfat), "USB");
 }
 
+#[cfg(not(windows))]
+#[test]
+fn unsupported_ffu_stops_before_target_access() {
+    let mut job = test_job(
+        Drive {
+            path: "never-open-this-test-device".into(),
+            name: "Test".into(),
+            size: 16 * MB,
+            serial: None,
+        },
+        PathBuf::from("unsupported.ffu"),
+    );
+    job.dd = true;
+    let (tx, cancel) = ctx_parts();
+    let error = run_job(&job, &tx, &cancel).unwrap_err();
+    assert!(
+        error.starts_with("Applying FFU images requires Windows DISM"),
+        "{error}"
+    );
+}
+
+#[test]
+fn source_open_errors_identify_the_image_not_the_disk() {
+    let path = Path::new("missing-source-image.iso");
+    let error = analyze(path).unwrap_err();
+    assert!(error.starts_with("Opening source image missing-source-image.iso:"));
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn authorized_source_reads_do_not_reopen_the_image_path() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("source.img");
+    let data = vec![0x6bu8; 4096];
+    std::fs::write(&path, &data).unwrap();
+    let pinned = File::open(&path).unwrap();
+    std::fs::rename(&path, directory.path().join("original.img")).unwrap();
+    std::fs::write(&path, b"different file").unwrap();
+    assert!(
+        !analyze_file(open_image(&path, Some(&pinned)).unwrap())
+            .unwrap()
+            .is_iso
+    );
+    for _ in 0..2 {
+        let mut source =
+            image::from_file(open_image(&path, Some(&pinned)).unwrap(), &path).unwrap();
+        let mut bytes = Vec::new();
+        source.reader.read_to_end(&mut bytes).unwrap();
+        assert_eq!(bytes, data);
+    }
+    let job = test_job(
+        Drive {
+            path: "/dev/never-open-this-test-device".into(),
+            name: "Test".into(),
+            size: 16 * MB,
+            serial: None,
+        },
+        path,
+    );
+    let (tx, cancel) = ctx_parts();
+    let error = run_job_with_image(&job, Some(&pinned), &tx, &cancel).unwrap_err();
+    assert!(error.starts_with("Opening ISO "), "{error}");
+    assert!(!error.contains("never-open-this-test-device"), "{error}");
+}
+
+#[test]
+#[ignore = "requires a caller-supplied Windows ISO; read-only"]
+fn analyze_real_windows_iso() {
+    let path = std::env::var_os("RUSTFUS_ISO").expect("set RUSTFUS_ISO to a Windows ISO");
+    let report = analyze(Path::new(&path)).unwrap();
+    println!("{report:?}");
+    assert!(report.windows && report.efi);
+    assert!(report.size > MB);
+}
+
 #[test]
 fn grub_version_is_found() {
     assert_eq!(

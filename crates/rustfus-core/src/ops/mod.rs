@@ -8,7 +8,7 @@ use crate::drives::run;
 use crate::fsos;
 use crate::{image, iso, syslinux, wue};
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -259,12 +259,23 @@ fn e(err: impl std::fmt::Display) -> String {
 }
 
 pub fn analyze(path: &Path) -> Result<Report, String> {
+    let file = open_image(path, None)?;
+    analyze_file(file).map_err(|error| format!("Analyzing image {}: {error}", path.display()))
+}
+
+fn open_image(path: &Path, pinned: Option<&File>) -> Result<File, String> {
+    pinned
+        .map_or_else(|| File::open(path), File::try_clone)
+        .map_err(|error| format!("Opening source image {}: {error}", path.display()))
+}
+
+fn analyze_file(mut file: File) -> Result<Report, String> {
     let mut head = [0u8; 512];
-    File::open(path)
-        .and_then(|mut f| f.read_exact(&mut head))
+    file.rewind()
+        .and_then(|()| file.read_exact(&mut head))
         .map_err(e)?;
     let hybrid = head[510..] == [0x55, 0xaa] && (0..4).any(|i| head[446 + i * 16 + 4] != 0);
-    let Ok(iso) = iso::Iso::open(path) else {
+    let Ok(iso) = iso::Iso::from_file(file) else {
         return Ok(Report {
             hybrid,
             ..Default::default()
@@ -506,6 +517,18 @@ impl Ctx<'_> {
 }
 
 pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<String, String> {
+    run_job_with_image(job, None, tx, cancel)
+}
+
+pub(crate) fn run_job_with_image(
+    job: &Job,
+    pinned: Option<&File>,
+    tx: &Sender<Msg>,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
+    let ctx = Ctx { tx, cancel };
+    ctx.check()?;
+    ctx.log(format!("Target: {}", job.drive.label()));
     #[cfg(target_os = "macos")]
     if matches!(job.boot, Boot::Image(_))
         && !job.dd
@@ -516,15 +539,18 @@ pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<Strin
         && macos::supports(
             job,
             &match &job.boot {
-                Boot::Image(path) => analyze(path)?,
+                Boot::Image(path) => {
+                    ctx.log("Analyzing source image for macOS write mode");
+                    analyze_file(open_image(path, pinned)?).map_err(|error| {
+                        format!("Analyzing source image {}: {error}", path.display())
+                    })?
+                }
                 _ => unreachable!(),
             },
         )
     {
-        return macos::run(job, tx, cancel);
+        return macos::run(job, pinned, tx, cancel);
     }
-    let ctx = Ctx { tx, cancel };
-    ctx.log(format!("Target: {}", job.drive.label()));
     if let Some(passes) = job.bad_blocks {
         unmount(&job.drive)?;
         let report = image::bad_blocks(
@@ -545,9 +571,9 @@ pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<Strin
         }
     }
     match &job.boot {
-        Boot::Image(img) if job.dd => write_dd(img, &job.drive, job.verify, &ctx),
+        Boot::Image(img) if job.dd => write_dd(img, pinned, &job.drive, job.verify, &ctx),
         Boot::Image(img) if job.wtg.is_some() => write_wtg(job, img, &ctx),
-        _ => write_fs(job, &ctx),
+        _ => write_fs(job, pinned, &ctx),
     }
 }
 

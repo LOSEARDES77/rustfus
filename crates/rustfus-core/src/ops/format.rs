@@ -5,7 +5,10 @@
 
 use super::files::{Dest, DirDest, copy_files};
 use super::layout::{ext_kind, fat_label, layout, write_tables, zero_range};
-use super::{Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze, e, open_dev, sanitize_label};
+use super::{
+    Boot, Ctx, Fs, Job, MB, Report, Scheme, Target, analyze_file, e, open_dev, open_image,
+    sanitize_label,
+};
 use crate::blockdev::BlockDev;
 use crate::{bootrec, fsos, iso, part, syslinux};
 use std::fs::File;
@@ -123,15 +126,21 @@ fn stage_syslinux(
 }
 
 /// ISO mode / format: partition, create the filesystem, copy files, install boot code.
-pub(super) fn write_fs(job: &Job, ctx: &Ctx) -> Result<String, String> {
+pub(super) fn write_fs(job: &Job, pinned: Option<&File>, ctx: &Ctx) -> Result<String, String> {
     let (iso, rep) = match &job.boot {
-        Boot::Image(p) => (
-            Some(
-                iso::Iso::open(p)
-                    .map_err(|error| format!("Opening ISO {}: {error}", p.display()))?,
-            ),
-            analyze(p)?,
-        ),
+        Boot::Image(p) => {
+            ctx.log(format!("Reading source ISO {}", p.display()));
+            let file = open_image(p, pinned)?;
+            let rep = analyze_file(file.try_clone().map_err(e)?)
+                .map_err(|error| format!("Analyzing source ISO {}: {error}", p.display()))?;
+            (
+                Some(
+                    iso::Iso::from_file(file)
+                        .map_err(|error| format!("Opening ISO {}: {error}", p.display()))?,
+                ),
+                rep,
+            )
+        }
         _ => (None, Report::default()),
     };
     let fs = job.fs;
