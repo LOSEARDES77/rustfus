@@ -72,6 +72,9 @@ hook attempts to move shared objects even for a static-only build. Only the
 static library and `mkntfs` tool are built. A local m4 definition makes the
 optional libgcrypt macro fail if crypto is accidentally enabled; no libgcrypt
 development package is needed to regenerate configure with crypto disabled.
+The optional `libintl.h` probe is disabled so Homebrew gettext headers cannot
+redirect libc's `setlocale` to an unlinked `libintl_setlocale` symbol. Locale
+support still uses the system C library; gettext is not a runtime dependency.
 `ntfs-import.c` is linked against the same archive with pkg-config's include flags.
 
 WIM builds use `--disable-shared --enable-static --without-fuse --without-ntfs-3g`.

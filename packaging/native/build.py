@@ -105,7 +105,13 @@ def build(out, host, target):
             flags += ["--disable-ntfs-3g", "--disable-crypto", "--disable-nfconv",
                       "--disable-mount-helper", "--disable-ldconfig", "--without-uuid",
                       "--disable-library"]
-            run([staged / "configure", *flags], staged, env)
+            # Homebrew gettext can expose libintl.h even when its library is not
+            # available for the target.  NTFS-3G only needs libc's setlocale;
+            # accepting that optional header redirects the call to
+            # libintl_setlocale and breaks the static mkntfs link.
+            configure_env = env.copy()
+            configure_env["ac_cv_header_libintl_h"] = "no"
+            run([staged / "configure", *flags], staged, configure_env)
             run([*make, f"-j{jobs}", "-C", "libntfs-3g"], staged, env)
             run([*make, f"-j{jobs}", "-C", "ntfsprogs", "mkntfs"], staged, env)
             shutil.copy2(staged / "ntfsprogs/mkntfs", binary / "mkntfs")
