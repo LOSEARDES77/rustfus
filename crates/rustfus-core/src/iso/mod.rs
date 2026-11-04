@@ -127,8 +127,11 @@ impl Iso {
     /// UDF/ISO9660 bridge images such as Windows ISOs only put a README stub
     /// on the ISO9660 side.
     pub fn open(path: &Path) -> io::Result<Iso> {
-        let f = File::open(path)?;
-        Self::open_iso9660(f.try_clone()?).or_else(|e| Self::open_udf(f).map_err(|_| e))
+        Self::from_file(File::open(path)?)
+    }
+
+    pub(crate) fn from_file(f: File) -> io::Result<Iso> {
+        Self::open_udf(f.try_clone()?).or_else(|_| Self::open_iso9660(f))
     }
 
     fn open_iso9660(f: File) -> io::Result<Iso> {

@@ -11,6 +11,28 @@ const SECTOR: usize = 512;
 const BLOCK: usize = 1 << 20;
 const MAX_BLOCKS: usize = 64;
 
+/// Synchronize a disk descriptor or a regular image file after writes.
+pub(crate) fn sync_storage(file: &File) -> io::Result<()> {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::{fd::AsRawFd, unix::fs::FileTypeExt};
+
+        let kind = file.metadata()?.file_type();
+        if kind.is_char_device() || kind.is_block_device() {
+            // sys/disk.h: _IO('d', 22). F_FULLFSYNC (Rust's sync_all) is a
+            // filesystem operation, not the raw disk's media-cache flush.
+            const DKIOCSYNCHRONIZECACHE: libc::c_ulong =
+                0x2000_0000 | ((b'd' as libc::c_ulong) << 8) | 22;
+            // SAFETY: the live descriptor is borrowed for a no-payload ioctl.
+            if unsafe { libc::ioctl(file.as_raw_fd(), DKIOCSYNCHRONIZECACHE) } == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            return Ok(());
+        }
+    }
+    file.sync_all()
+}
+
 pub fn read_at(f: &File, buf: &mut [u8], off: u64) -> io::Result<()> {
     #[cfg(unix)]
     return std::os::unix::fs::FileExt::read_exact_at(f, buf, off);
@@ -221,7 +243,7 @@ impl Write for BlockDev<'_> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.write_back()?;
-        self.file.sync_all()
+        sync_storage(self.file)
     }
 }
 

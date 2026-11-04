@@ -157,6 +157,7 @@ where
     for msg in rx {
         match msg {
             Msg::Progress(_, s) => progress(&s),
+            Msg::CurrentFile(s) => progress(&s),
             Msg::Log(s) => eprintln!("\r{s:70}"),
             Msg::Done(r) => {
                 eprint!("\r{:70}\r", "");
@@ -201,7 +202,11 @@ fn write(a: WriteArgs) -> Result<(), String> {
         return Err("GPT drives can only target UEFI".into());
     }
     let fs = a.fs.unwrap_or(if iso_mode {
-        report.default_fs()
+        if cfg!(target_os = "macos") && report.windows && report.efi {
+            Fs::Fat32
+        } else {
+            report.default_fs()
+        }
     } else {
         Fs::Fat32
     });

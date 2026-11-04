@@ -15,6 +15,10 @@ pub mod fsos;
 pub mod image;
 pub mod iso;
 pub mod loc;
+#[cfg(target_os = "macos")]
+pub mod macos_auth;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod native_tools;
 pub mod net;
 pub mod ops;
 pub mod part;

@@ -66,7 +66,10 @@ fn sparse(s: crate::vhdx::Sparse) -> Source {
 }
 
 pub fn open(path: &Path) -> io::Result<Source> {
-    let mut f = File::open(path)?;
+    from_file(File::open(path)?, path)
+}
+
+pub(crate) fn from_file(mut f: File, path: &Path) -> io::Result<Source> {
     let total = f.metadata()?.len();
     let consumed = Arc::new(AtomicU64::new(0));
     let mut size = None;
@@ -356,7 +359,7 @@ pub fn bad_blocks(
                 }
             }
             if phase == 0 {
-                f.sync_all()?;
+                crate::blockdev::sync_storage(&f)?;
                 drop_cache(&f);
             }
         }

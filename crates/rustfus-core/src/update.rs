@@ -174,7 +174,14 @@ pub fn newest_release(json: &[u8], include_betas: bool) -> Result<Option<Release
 /// Asks GitHub for the newest release, returning it only when it is newer
 /// than this build.
 pub fn check(include_betas: bool) -> Result<Option<Release>, String> {
-    let json = net::fetch_with(
+    check_with(include_betas, net::fetch_with)
+}
+
+fn check_with(
+    include_betas: bool,
+    fetch: impl FnOnce(&str, &[&str]) -> Result<Vec<u8>, String>,
+) -> Result<Option<Release>, String> {
+    let json = fetch(
         RELEASES_API,
         &[
             "-H",

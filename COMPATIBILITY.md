@@ -3,8 +3,10 @@
 🟢 works &nbsp;&nbsp; 🟡 partial / needs an extra tool &nbsp;&nbsp; 🔴 not available
 
 "Works" means implemented and covered by automated tests on disk-image files.
-The Windows and macOS builds compile cleanly but have not been run on those
-systems.
+macOS GUI and local disk-image tests have run, but physical-USB raw writes have
+reported EPERM/ENOTTY failures. The new macOS Windows-UEFI `diskutil` path still
+requires physical-USB and boot validation. Windows runtime UAC changes require
+native CI/runtime confirmation.
 
 ## Drives and images
 
@@ -13,7 +15,7 @@ systems.
 | List USB / removable drives | 🟢 | 🟢 | 🟢 | `lsblk` / `Get-Disk` / `diskutil` |
 | List USB hard drives (fixed disks) | 🟢 | 🟢 | 🟢 | system disks always hidden |
 | Hot-plug refresh | 🟢 | 🟢 | 🟢 | 2 s background scan |
-| DD write + verify (.iso .img .bin .raw) | 🟢 | 🟢 | 🟢 | macOS uses fast `/dev/rdisk` |
+| DD write + verify (.iso .img .bin .raw) | 🟢 | 🟢 | 🟡 | macOS raw `/dev/rdisk` writes have unresolved user-reported failures |
 | Compressed images (.gz .bz2 .xz .lzma .zst .zip) | 🟢 | 🟢 | 🟢 | |
 | VHD (fixed + dynamic), VHDX (dynamic) | 🟢 | 🟢 | 🟢 | differencing disks rejected |
 | FFU images (write) | 🔴 | 🟡 | 🔴 | DISM only exists on Windows |
@@ -29,12 +31,13 @@ systems.
 | ISO9660 / Joliet / Rock Ridge extraction | 🟢 | 🟢 | 🟢 | |
 | UDF images | 🟢 | 🟢 | 🟢 | read-only, 2048-byte blocks |
 | ISOHybrid ISO/DD prompt | 🟢 | 🟢 | 🟢 | |
-| Windows install USB, FAT32 (UEFI + BIOS) | 🟢 | 🟢 | 🟢 | own FAT32 formatter + ms-sys boot code |
-| Windows install USB, NTFS + UEFI:NTFS (>4 GB files) | 🟡 | 🟢 | 🔴 | Linux needs `mkfs.ntfs`; macOS can't write NTFS |
+| Windows install USB, FAT32 (UEFI + BIOS) | 🟢 | 🟢 | 🟡 | macOS UEFI/GPT uses diskutil + mounted copy; physical USB/boot unverified, BIOS remains raw |
+| Windows install USB, NTFS + UEFI:NTFS (>4 GB files) | 🟡 | 🟢 | 🟡 | bundled FUSE-free NTFS-3G image preparation; temporary partition-image space required; physical USB/boot unverified |
+| FAT32 install.wim splitting | 🟢 | 🔴 | 🟡 | bundled wimlib on Linux/macOS; validates parts before erasure; oversized ESD requires NTFS |
 | Windows install USB, exFAT | 🔴 | 🔴 | 🔴 | refused: UEFI:NTFS loads bootmgfw.efi, but Windows Boot Manager can't read the BCD from exFAT (0xc0000272) |
 | Windows User Experience (unattend.xml) | 🟢 | 🟢 | 🟢 | |
 | Windows To Go | 🔴 | 🟡 | 🔴 | DISM + bcdboot; untested |
-| Linux ISO, UEFI boot | 🟢 | 🟢 | 🟢 | |
+| Linux ISO, UEFI boot | 🟢 | 🟢 | 🟡 | macOS still uses the raw backend; reported writes remain unresolved |
 | Linux ISO, BIOS boot via GRUB 2 | 🟢 | 🟢 | 🟢 | embedded core.img 2.14 |
 | GRUB version download (signed, rufus.ie) | 🟢 | 🟢 | 🟢 | needs `curl` (built into Windows 10+/macOS) |
 | Linux ISO, BIOS boot via Syslinux, FAT32 | 🟢 | 🟢 | 🟢 | embedded v4/v6, others downloaded (signed) |
@@ -52,7 +55,7 @@ systems.
 | File system | Linux | Windows | macOS | Notes |
 |---|:-:|:-:|:-:|---|
 | FAT / FAT32 (any size) | 🟢 | 🟢 | 🟢 | own formatter, no 32 GB limit |
-| NTFS | 🟡 | 🟢 | 🔴 | Linux: `mkfs.ntfs` (ntfs-3g) |
+| NTFS | 🟢 | 🟢 | 🟡 | bundled NTFS-3G formatter and image writer on Linux/macOS, no FUSE; physical macOS validation pending |
 | exFAT | 🟡 | 🟢 | 🟢 | Linux: `mkfs.exfat` (exfatprogs) |
 | UDF | 🟡 | 🟢 | 🟢 | Linux: `mkudffs` (udftools) |
 | ReFS | 🔴 | 🟡 | 🔴 | Windows editions with ReFS support only |
@@ -65,7 +68,7 @@ systems.
 
 | Feature | Linux | Windows | macOS | Notes |
 |---|:-:|:-:|:-:|---|
-| Rufus-style egui window | 🟢 | 🟢 | 🟢 | |
+| Rufus-style GPUI Kit window | 🟢 | 🟢 | 🟢 | |
 | 38 languages (rufus.loc) | 🟢 | 🟢 | 🟢 | |
 | Log, About, dark mode | 🟢 | 🟢 | 🟢 | |
 | Drag and drop images | 🟢 | 🟢 | 🟢 | |

@@ -8,7 +8,7 @@ use crate::drives::run;
 use crate::fsos;
 use crate::{image, iso, syslinux, wue};
 use std::fs::{File, OpenOptions};
-use std::io::Read;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -17,29 +17,37 @@ mod dd;
 mod files;
 mod format;
 mod layout;
+#[cfg(target_os = "macos")]
+pub mod macos;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod ntfs;
 #[cfg(test)]
 #[path = "../../tests/unit/ops.rs"]
 mod tests;
 mod to_go;
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+mod wim;
 
 use dd::write_dd;
 use format::write_fs;
 use to_go::write_wtg;
 
+#[derive(serde::Serialize, serde::Deserialize)]
 pub enum Msg {
     Progress(f32, String),
+    CurrentFile(String),
     Log(String),
     Done(Result<String, String>),
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Scheme {
     Mbr,
     Gpt,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Target {
     BiosUefi,
@@ -57,7 +65,7 @@ impl Target {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
 pub enum Fs {
     Fat,
@@ -126,7 +134,7 @@ impl Fs {
             Fs::Fat | Fs::Fat32 | Fs::Exfat | Fs::Udf => true,
             Fs::Refs => cfg!(windows),
             Fs::Ext2 | Fs::Ext3 | Fs::Ext4 => true,
-            Fs::Ntfs => !cfg!(target_os = "macos"),
+            Fs::Ntfs => cfg!(any(windows, target_os = "macos", target_os = "linux")),
         }
     }
 
@@ -139,14 +147,14 @@ impl Fs {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Boot {
     NonBootable,
     FreeDos,
     Image(PathBuf),
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Job {
     pub drive: Drive,
     pub boot: Boot,
@@ -179,6 +187,7 @@ pub struct Report {
     pub is_iso: bool,
     pub label: String,
     pub windows: bool,
+    pub windows_11: bool,
     pub efi: bool,
     pub bios: bool,
     pub grub2: bool,
@@ -254,12 +263,23 @@ fn e(err: impl std::fmt::Display) -> String {
 }
 
 pub fn analyze(path: &Path) -> Result<Report, String> {
+    let file = open_image(path, None)?;
+    analyze_file(file).map_err(|error| format!("Analyzing image {}: {error}", path.display()))
+}
+
+fn open_image(path: &Path, pinned: Option<&File>) -> Result<File, String> {
+    pinned
+        .map_or_else(|| File::open(path), File::try_clone)
+        .map_err(|error| format!("Opening source image {}: {error}", path.display()))
+}
+
+fn analyze_file(mut file: File) -> Result<Report, String> {
     let mut head = [0u8; 512];
-    File::open(path)
-        .and_then(|mut f| f.read_exact(&mut head))
+    file.rewind()
+        .and_then(|()| file.read_exact(&mut head))
         .map_err(e)?;
     let hybrid = head[510..] == [0x55, 0xaa] && (0..4).any(|i| head[446 + i * 16 + 4] != 0);
-    let Ok(iso) = iso::Iso::open(path) else {
+    let Ok(iso) = iso::Iso::from_file(file) else {
         return Ok(Report {
             hybrid,
             ..Default::default()
@@ -301,6 +321,7 @@ pub fn analyze(path: &Path) -> Result<Report, String> {
         is_iso: true,
         label: iso.volume_id(),
         windows,
+        windows_11: windows && crate::wtg::is_windows_11(&iso),
         efi: et.efi
             || lower
                 .iter()
@@ -420,11 +441,21 @@ fn open_dev(d: &Drive) -> Result<File, String> {
     #[cfg(target_os = "linux")]
     std::os::unix::fs::OpenOptionsExt::custom_flags(&mut opts, libc::O_EXCL);
     opts.open(&dev).map_err(|err| {
-        #[cfg(target_os = "linux")]
-        if err.raw_os_error() == Some(libc::EBUSY) {
-            return format!("{dev} is in use (mounted, swap, LVM or RAID); release it and retry");
+        #[cfg(target_os = "macos")]
+        {
+            crate::macos_auth::disk_open_error(&dev, &err)
         }
-        format!("Cannot open {dev}: {err} (run as root/Administrator)")
+        #[cfg(not(target_os = "macos"))]
+        {
+            #[cfg(target_os = "linux")]
+            if err.raw_os_error() == Some(libc::EBUSY) {
+                return format!(
+                    "{dev} is in use (mounted, swap, LVM or RAID); release it and retry"
+                );
+            }
+            let hint = "run as root/Administrator";
+            format!("Cannot open {dev}: {err} ({hint})")
+        }
     })
 }
 
@@ -461,6 +492,43 @@ struct Ctx<'a> {
 }
 
 impl Ctx<'_> {
+    fn bad_blocks(&self, job: &Job) -> Result<(), String> {
+        let Some(passes) = job.bad_blocks else {
+            return Ok(());
+        };
+        self.check()?;
+        unmount(&job.drive)?;
+        let report = image::bad_blocks(
+            &raw_path(&job.drive),
+            job.drive.size,
+            usize::from(passes),
+            &|p, s| self.progress(p, s),
+            self.cancel,
+        )
+        .map_err(e)?;
+        let message = format!(
+            "Bad blocks check: {} bad sectors ({} read, {} write, {} corruption errors)",
+            report.bad_sectors, report.read_errors, report.write_errors, report.corruption_errors
+        );
+        self.log(&message);
+        if report.bad_sectors > 0 {
+            return Err(message);
+        }
+        Ok(())
+    }
+    fn open_unmounted(&self, drive: &Drive) -> Result<File, String> {
+        self.check()?;
+        self.log(format!("Verifying and unmounting {}", drive.path));
+        unmount(drive).map_err(|error| format!("Verifying/unmounting {}: {error}", drive.path))?;
+        self.log(format!(
+            "Unmount complete; opening {} for disk access",
+            raw_path(drive)
+        ));
+        self.check()?;
+        let device = open_dev(drive)?;
+        self.log("Raw disk access granted");
+        Ok(device)
+    }
     fn progress(&self, p: f32, s: impl Into<String>) {
         self.tx.send(Msg::Progress(p, s.into())).ok();
     }
@@ -477,31 +545,50 @@ impl Ctx<'_> {
 }
 
 pub fn run_job(job: &Job, tx: &Sender<Msg>, cancel: &AtomicBool) -> Result<String, String> {
+    run_job_with_image(job, None, tx, cancel)
+}
+
+pub(crate) fn run_job_with_image(
+    job: &Job,
+    pinned: Option<&File>,
+    tx: &Sender<Msg>,
+    cancel: &AtomicBool,
+) -> Result<String, String> {
     let ctx = Ctx { tx, cancel };
+    ctx.check()?;
     ctx.log(format!("Target: {}", job.drive.label()));
-    if let Some(passes) = job.bad_blocks {
-        unmount(&job.drive)?;
-        let report = image::bad_blocks(
-            &raw_path(&job.drive),
-            job.drive.size,
-            usize::from(passes),
-            &|p, s| ctx.progress(p, s),
-            cancel,
+    #[cfg(target_os = "macos")]
+    if matches!(job.boot, Boot::Image(_))
+        && !job.dd
+        && job.fs == Fs::Fat32
+        && job.scheme == Scheme::Gpt
+        && job.target == Target::Uefi
+        && job.wtg.is_none()
+        && macos::supports(
+            job,
+            &match &job.boot {
+                Boot::Image(path) => {
+                    ctx.log("Analyzing source image for macOS write mode");
+                    analyze_file(open_image(path, pinned)?).map_err(|error| {
+                        format!("Analyzing source image {}: {error}", path.display())
+                    })?
+                }
+                _ => unreachable!(),
+            },
         )
-        .map_err(e)?;
-        let msg = format!(
-            "Bad blocks check: {} bad sectors ({} read, {} write, {} corruption errors)",
-            report.bad_sectors, report.read_errors, report.write_errors, report.corruption_errors
-        );
-        ctx.log(&msg);
-        if report.bad_sectors > 0 {
-            return Err(msg);
-        }
+    {
+        return macos::run(job, pinned, tx, cancel);
     }
     match &job.boot {
-        Boot::Image(img) if job.dd => write_dd(img, &job.drive, job.verify, &ctx),
-        Boot::Image(img) if job.wtg.is_some() => write_wtg(job, img, &ctx),
-        _ => write_fs(job, &ctx),
+        Boot::Image(img) if job.dd => {
+            ctx.bad_blocks(job)?;
+            write_dd(img, pinned, &job.drive, job.verify, &ctx)
+        }
+        Boot::Image(img) if job.wtg.is_some() => {
+            ctx.bad_blocks(job)?;
+            write_wtg(job, img, &ctx)
+        }
+        _ => write_fs(job, pinned, &ctx),
     }
 }
 

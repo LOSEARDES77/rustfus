@@ -3,7 +3,7 @@
 # Rustfus
 
 **Rustfus** is a Rust rewrite of [Rufus](https://rufus.ie), the Reliable USB
-Formatting Utility, with an [egui](https://github.com/emilk/egui) interface
+Formatting Utility, with an [GPUI Kit](https://github.com/longbridge/gpui-component) interface
 that mirrors the original. Its purpose is to bring the Rufus tool to
 platforms where it doesn't run: **Linux and macOS**, as well as Windows.
 
@@ -48,10 +48,15 @@ See [COMPATIBILITY.md](COMPATIBILITY.md) for what works on each OS.
 Requires Rust 1.95 or newer (edition 2024).
 
 ```sh
+git submodule update --init --recursive
 cargo build --release
 ```
 
 The executable is `target/release/rustfus` (`rustfus.exe` on Windows).
+macOS/Linux builds also require a C compiler, Python 3, autoconf, automake,
+GNU libtool, make and pkg-config. [Native-tool build details](docs/native-tools.md)
+cover setup and the pinned NTFS-3G/wimlib submodules. These are build-time
+requirements; the resulting executable embeds its NTFS and WIM helpers.
 
 The code is split into a workspace:
 
@@ -59,7 +64,69 @@ The code is split into a workspace:
 |---|---|
 | `crates/rustfus-cli` | The `rustfus` executable (the only binary): the command line, or the GUI when run without arguments |
 | `crates/rustfus-core` | Engine: drive listing, image analysis, partitioning, file systems, boot code, downloads |
-| `crates/rustfus-gui` | The Rufus-style egui interface |
+| `crates/rustfus-gui` | The Rufus-style GPUI Kit interface |
+
+### Window appearance
+
+On macOS and Windows, the main window uses native background blur with strongly
+tinted GPUI Kit cards for Drive Properties, Format Options, and Status. Form
+controls remain solid for readability. Use
+**Theme → Window blur** in the top-right title-bar toolbar to switch to an
+opaque background. Language and update settings are also in that toolbar.
+The custom Kit title bar retains platform window controls and dragging.
+Light, Dark, and System modes apply to the content and window appearance.
+Blur availability and appearance depend on the operating system and compositor;
+other platforms use an opaque background. The downloader and Checksums windows
+remain solid.
+The main form has no page or card scrolling. Its window fits the measured
+content as options expand or collapse; tall forms use side-by-side cards on
+wider displays and compact spacing when needed. Menus and log text can scroll.
+
+### macOS disk writing: verification status
+
+**The current raw-disk backend has reported physical-USB failures on macOS**
+(`Operation not permitted` and `Inappropriate ioctl for device`). The flush
+failure was reproduced on a disposable raw disk-image device: Rust's
+`sync_all()` uses `F_FULLFSYNC`, which is not supported on that descriptor.
+Raw devices now use `DKIOCSYNCHRONIZECACHE`, with failures still reported.
+Complete physical-USB creation and boot remain unverified; do not treat raw
+Linux ISO/DD writing as verified on macOS. Privacy denials remain separate.
+
+Windows UEFI installation media now uses an OS-managed path: `/usr/sbin/diskutil`
+creates GPT/FAT32, then Rustfus copies files into the verified mounted volume
+without opening `/dev/rdisk*` or requesting root. macOS may still ask permission
+to manage removable storage. This path requires Quick format, default cluster
+size, and no persistence, bad-block test, or legacy BIOS options. It never
+falls back to raw writes after an error.
+
+For `sources/install.wim` larger than 4 GB, Rustfus uses bundled wimlib on
+macOS/Linux. No Homebrew or system wimlib installation is needed. Rustfus stages
+and validates split `.swm` files **before any erase**. Oversized `install.esd`
+and other oversized files require NTFS rather than FAT32.
+Cancellation waits for an already-running `diskutil` format to finish before
+stopping; interrupting partition creation is not safe.
+
+The new mounted path is covered by mocked disk operations and a disposable
+FAT32 disk-image write/flush test. A complete physical-USB creation and Windows
+boot test is still required. Existing drive identity checks and erase
+confirmation remain mandatory. Raw/DD/BIOS operations keep the separate
+administrator-authorization path; authorization does not bypass macOS privacy
+or device-security restrictions.
+
+### Bundled NTFS on macOS and Linux
+
+NTFS is available in the existing filesystem selector. Rustfus uses bundled
+NTFS-3G tools to format and populate a private filesystem image, verifies its
+files, then writes it into the verified USB partition. This does not mount NTFS,
+install a driver, or require macFUSE. Windows UEFI jobs retain the UEFI:NTFS
+helper partition. Physical USB boot validation is still required.
+
+This approach needs temporary space for the whole NTFS partition image plus
+the extracted ISO files and 256 MiB of headroom. It writes the entire partition
+image, so even Quick format is not a quick mounted-volume copy. Source staging,
+tool errors and insufficient space are reported before disk erasure. Linux's
+special Syslinux-on-NTFS BIOS path still uses system mkfs/mount utilities and
+sector mapping; it is not covered by the FUSE-free bundled path.
 
 ## Command line
 
@@ -90,7 +157,7 @@ Download from the [Releases](../../releases) page:
 | System | File | Notes |
 |---|---|---|
 | Windows (x86_64 / ARM64) | `Rustfus-<version>-windows-<arch>.exe` | Portable, asks for Administrator rights (UAC) at launch |
-| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Run with `sudo /Applications/Rustfus.app/Contents/MacOS/rustfus` |
+| macOS 11+ (Intel / Apple Silicon) | `Rustfus-<version>-macos-universal.dmg` | Unsigned: right-click → *Open* the first time. Windows UEFI media uses macOS storage management; raw operations request administrator authorization. See the macOS verification status above. |
 | Debian, Ubuntu, Mint… | `rustfus_<version>-1_<arch>.deb` | `sudo apt install ./rustfus_*.deb` |
 | Fedora, openSUSE, RHEL… | `rustfus-<version>-1.<arch>.rpm` | `sudo dnf install ./rustfus-*.rpm` |
 | Arch, Manjaro, CachyOS… | `rustfus-<version>-1-x86_64.pkg.tar.zst` | `sudo pacman -U rustfus-*.pkg.tar.zst` |

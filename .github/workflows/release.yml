@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Tag must match Cargo.toml version
         run: |
           version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
@@ -27,16 +29,13 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-          targets: x86_64-pc-windows-gnu,aarch64-apple-darwin
       - uses: Swatinem/rust-cache@v2
-      # Optional tools some tests use to check the written images.
-      - run: sudo apt-get update && sudo apt-get install -y xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
+      - name: Linux GUI dependencies and optional disk-image test tools
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev xorriso genisoimage dosfstools e2fsprogs fdisk qemu-utils
       - run: cargo test --workspace --locked
-      - name: Clippy (Linux, Windows, macOS)
-        run: |
-          for t in x86_64-unknown-linux-gnu x86_64-pc-windows-gnu aarch64-apple-darwin; do
-            cargo clippy --locked --workspace --all-targets --target "$t" -- -D warnings
-          done
+      # Native GUI backend SDKs are checked by each platform's CI job.
+      - name: Clippy (Linux)
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   windows:
     needs: test
@@ -49,11 +48,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2
-      # build.rs embeds the icon and a manifest that asks for Administrator rights.
+      # GPUI supplies the sole manifest; the CLI host requests UAC via runas.
       - run: cargo build --locked --release --target ${{ matrix.target }}
       - shell: bash
         run: |
@@ -67,9 +68,19 @@ jobs:
 
   macos:
     needs: test
-    runs-on: macos-latest
+    # Icon Composer compilation needs full Xcode 26+ on macOS 26+.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+      - name: Install native helper build dependencies
+        run: brew install autoconf automake libtool pkg-config
+      - name: Validate macOS icon packaging
+        run: |
+          xcodebuild -version
+          xcrun --find actool
+          python3 packaging/test-macos-icons.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -84,13 +95,6 @@ jobs:
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" dist
           lipo -create -output "$app/Contents/MacOS/rustfus" \
             target/aarch64-apple-darwin/release/rustfus target/x86_64-apple-darwin/release/rustfus
-          iconset=build/rustfus.iconset
-          mkdir -p "$iconset"
-          for s in 16 32 128 256; do
-            sips -z $s $s res/rustfus.png --out "$iconset/icon_${s}x${s}.png" > /dev/null
-            sips -z $((s*2)) $((s*2)) res/rustfus.png --out "$iconset/icon_${s}x${s}@2x.png" > /dev/null
-          done
-          iconutil -c icns "$iconset" -o "$app/Contents/Resources/rustfus.icns"
           cat > "$app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>
           <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -105,8 +109,11 @@ jobs:
             <key>CFBundlePackageType</key><string>APPL</string>
             <key>LSMinimumSystemVersion</key><string>11.0</string>
             <key>NSHighResolutionCapable</key><true/>
+            <key>NSRemovableVolumesUsageDescription</key><string>Rustfus needs access to removable volumes to create bootable media.</string>
           </dict></plist>
           EOF
+          python3 packaging/macos-icons.py "$app" --mode required
+          plutil -lint "$app/Contents/Info.plist"
           cp LICENSE README.md THIRD_PARTY_NOTICES.md build/
           ln -s /Applications build/Applications
           hdiutil create -volname "Rustfus ${version}" -srcfolder build -ov -format UDZO \
@@ -129,6 +136,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
@@ -136,6 +145,8 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-deb,cargo-generate-rpm
+      - name: Install Linux GUI build dependencies
+        run: sudo apt-get update && sudo apt-get install -y autoconf automake libtool pkg-config libfontconfig1-dev libwayland-dev libxkbcommon-dev libxkbcommon-x11-dev libxcb1-dev libegl1-mesa-dev
       - run: cargo build --locked --release --target ${{ matrix.target }}
       - name: .deb, .rpm and AppImage
         run: |
@@ -164,6 +175,8 @@ jobs:
     container: archlinux:base-devel
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - uses: actions/download-artifact@v8
         with:
           name: bin-linux-x86_64
@@ -189,6 +202,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          submodules: recursive
       - name: Download upstream sources listed in res/SOURCES.txt
         run: |
           dir="rustfus-${GITHUB_REF_NAME}-third-party-sources"
@@ -197,6 +212,7 @@ jobs:
             name=$(echo "$url" | sed -E 's|https://||; s|^web\.archive\.org/web/[0-9]+id_/https://||; s|/archive/refs/tags/|-|; s|/archive/|-|; s|[/]|_|g')
             curl -fsSL --retry 3 -o "$dir/$name" "$url"
           done
+          python3 packaging/native/source-archive.py "$dir/rustfus-corresponding-source.tar.gz"
           cp res/SOURCES.txt THIRD_PARTY_NOTICES.md "$dir/"
           for f in res/*/readme.txt; do cp "$f" "$dir/$(basename "$(dirname "$f")")-readme.txt"; done
           tar cf "dist/$dir.tar" "$dir"

@@ -32,7 +32,20 @@ were written from the format specifications, using Rufus' bundled libcdio
 | `res/md5/`                                                                         | [uefi-md5sum](https://github.com/pbatard/uefi-md5sum) bootloaders                                                                                                                                                                          | © Pete Batard                                              | GPL-2.0                                                                                                                                                                                                                   |
 | `res/loc/rufus.loc`                                                                | Rufus translations (38 languages)                                                                                                                                                                                                          | © Pete Batard and the Rufus translators listed in the file | GPL-3.0-or-later                                                                                                                                                                                                          |
 | `res/rufus_pubkey.bin`                                                             | Rufus' RSA public key, used only to verify files downloaded from rufus.ie                                                                                                                                                                  | Pete Batard                                                | Public key (not copyrightable data)                                                                                                                                                                                       |
-| `res/rustfus.png`, `res/rustfus.ico`                                               | Rustfus icon                                                                                                                                                                                                                               | Rustfus contributors                                       | GPL-3.0-or-later. The gear-and-R emblem resembles the Rust logo, a trademark of the Rust Foundation (logo licensed CC-BY 4.0); see the [Rust trademark policy](https://rustfoundation.org/policy/rust-trademark-policy/). |
+| `res/rustfus.png`, `res/rustfus.ico`, `res/macos/rustfus.icon/`, `res/macos/rustfus.icns` | Rustfus icon; [macOS source provenance and packaging](res/macos/README.md)                                                                                                                                                                    | Rustfus contributors                                       | GPL-3.0-or-later. The gear-and-R emblem resembles the Rust logo, a trademark of the Rust Foundation (logo licensed CC-BY 4.0); see the [Rust trademark policy](https://rustfoundation.org/policy/rust-trademark-policy/). |
+
+### Interface icons
+
+`res/icons/*.svg` contains 41 selected outline SVG assets from
+`@tabler/icons` 3.50.0. No full icon catalog or font bundle is embedded.
+Tabler Icons is MIT licensed; the upstream notice is reproduced in
+[res/icons/LICENSE](res/icons/LICENSE).
+
+Asset filenames preserve GPUI Kit's compatibility paths, including menu,
+select, input, spinner, and window-control defaults. The SVG bytes are
+unchanged Tabler originals. The package checksum and filename mappings are
+recorded in [res/icons/SOURCES.json](res/icons/SOURCES.json). Upstream:
+[Tabler Icons](https://github.com/tabler/tabler-icons/tree/v3.50.0).
 
 ### Why GPL-2.0 binaries can ship inside a GPL-3.0 program
 
@@ -63,6 +76,28 @@ automatically: it downloads every archive listed in
 as `rustfus-<version>-third-party-sources.tar`. If you change a file in
 `res/`, update `res/SOURCES.txt` to match.
 
+## Native helper executables built from bundled source
+
+On macOS and Linux, Rustfus embeds `mkntfs`, `wimlib-imagex` and the app-owned
+`ntfs-import` helper. They are separate executables, not libraries linked into
+the Rust application. The NTFS helpers link libntfs-3g statically; wimlib-imagex
+links libwim statically. Only operating-system runtime libraries remain dynamic.
+
+| Source | Pinned release and commit | License and notices |
+| --- | --- | --- |
+| [ntfs-3g](https://github.com/tuxera/ntfs-3g) | 2026.9.28, `7f0f841fc52cf719106c5c93bafe465004e36816` | GPL-2.0-or-later for the library and utilities; see `vendor/ntfs-3g/COPYING`, `COPYING.LIB`, `AUTHORS` and per-file copyright notices. Copyright Tuxera Inc. and contributing NTFS-3G developers. |
+| [wimlib](https://github.com/ebiggers/wimlib) | v1.14.5, `cd5e231c348c255ae5088873b5a66ee0eb96fa07` | wimlib-imagex GPL-3.0-or-later; libwim LGPL-2.1-or-later, with additional permissively licensed components. See `vendor/wimlib/COPYING`, `COPYING.GPLv3`, `COPYING.LGPL` and per-file notices. Copyright Eric Biggers and contributors. |
+
+The Rustfus-owned NTFS import glue is GPL-3.0-or-later. No FUSE driver, macOS
+kernel extension or externally installed NTFS/WIM library is distributed or
+required. Windows does not embed these helpers.
+
+The release source asset includes a committed Rustfus source archive with the
+complete pinned submodule trees, upstream license files, glue and build scripts.
+See [native tool build and source packaging](docs/native-tools.md) and
+`packaging/native/pins.json` for reproduction details. This is in addition to
+the existing source archives for resources in `res/`.
+
 ## Downloaded at runtime (not distributed)
 
 | What                                                             | From                                                                                                                                         | License                                              |
@@ -77,5 +112,5 @@ All crates Rustfus links are under licenses compatible with GPL-3.0:
 MIT, Apache-2.0, BSD-2/3-Clause, Zlib, ISC, BSL-1.0, Unlicense, 0BSD,
 Unicode-3.0, bzip2-1.0.6, and dual-licensed crates for which a permissive
 option is chosen (`r-efi`: MIT/Apache-2.0; `self_cell`: Apache-2.0).
-egui's bundled fonts are under the SIL Open Font License 1.1 and the Ubuntu
+The bundled Inter font is under the SIL Open Font License 1.1 and the Ubuntu
 Font Licence 1.0. Run `cargo tree --format "{p} {l}"` for the full list.

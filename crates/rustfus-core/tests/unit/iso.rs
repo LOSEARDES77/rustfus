@@ -252,8 +252,10 @@ fn iso_udf_genisoimage() {
         "{es:?}"
     );
     let iso = Iso::open(&out).unwrap();
-    assert!(iso.udf.is_none());
+    assert!(iso.udf.is_some());
     assert_eq!(sorted(&es), sorted(&iso.entries().unwrap()));
+    let plain = Iso::open_iso9660(File::open(&out).unwrap()).unwrap();
+    assert_eq!(sorted(&es), sorted(&plain.entries().unwrap()));
     let _ = fs::remove_dir_all(&d);
 }
 
@@ -385,6 +387,71 @@ fn udf_image() -> Vec<u8> {
     let link = [&[2u8, 0, 0, 0][..], &[5, 6, 0, 0], b"\x08a.txt"].concat();
     sec(&mut img, P + 7, &fe(261, 12, 3, link.len() as u64, &link));
     img
+}
+
+#[test]
+fn iso_udf_bridge_prefers_udf_over_readme_stub() {
+    let mut img = udf_image();
+    img[16 * 2048..19 * 2048].fill(0);
+    let pvd = &mut img[16 * 2048..17 * 2048];
+    (pvd[0], pvd[6]) = (1, 1);
+    put(pvd, 1, b"CD001");
+    pvd[40..72].fill(b' ');
+    put(pvd, 40, b"ISO_STUB");
+    put(pvd, 156, &rec(24, 2048, 2, &[0]));
+    let boot = &mut img[17 * 2048..18 * 2048];
+    put(boot, 1, b"CD001");
+    put(boot, 7, b"EL TORITO SPECIFICATION");
+    put(boot, 71, &26u32.to_le_bytes());
+    img[18 * 2048] = 255;
+    put(&mut img, 18 * 2048 + 1, b"CD001");
+    let dir = [
+        rec(24, 2048, 2, &[0]),
+        rec(24, 2048, 2, &[1]),
+        rec(25, 135, 0, b"README.TXT"),
+    ]
+    .concat();
+    put(&mut img, 24 * 2048, &dir);
+    let catalog = &mut img[26 * 2048..27 * 2048];
+    catalog[0] = 1;
+    put(catalog, 30, &[0x55, 0xaa]);
+    catalog[32] = 0x88;
+    put(catalog, 64, &[0x91, 0xef]);
+    catalog[96] = 0x88;
+
+    let d = tmp("udfbridge");
+    let p = d.join("bridge.iso");
+    fs::write(&p, &img).unwrap();
+    let plain = Iso::open_iso9660(File::open(&p).unwrap()).unwrap();
+    let stub = plain.entries().unwrap();
+    assert_eq!((stub.len(), stub[0].size), (1, 135));
+
+    let iso = Iso::open(&p).unwrap();
+    assert!(iso.udf.is_some());
+    assert_eq!(iso.volume_id(), "UDF_ONLY");
+    assert!(iso.el_torito().bios && iso.el_torito().efi);
+    let entries = iso.entries().unwrap();
+    assert!(entries.iter().any(|e| e.path == "Dïr✓/big.bin"));
+    assert!(!entries.iter().any(|e| e.path == "README.TXT"));
+    let file = entries.iter().find(|e| e.path == "a.txt").unwrap();
+    let mut data = Vec::new();
+    iso.reader(file).unwrap().read_to_end(&mut data).unwrap();
+    assert_eq!(data, b"hello");
+
+    let pinned = File::open(&p).unwrap();
+    fs::rename(&p, d.join("original.iso")).unwrap();
+    fs::write(&p, b"replaced image path").unwrap();
+    let retained = Iso::from_file(pinned).unwrap();
+    assert_eq!(sorted(&retained.entries().unwrap()), sorted(&entries));
+
+    img[256 * 2048 + 4] ^= 1;
+    fs::write(&p, &img).unwrap();
+    let fallback = Iso::open(&p).unwrap();
+    assert!(fallback.udf.is_none());
+    assert_eq!(fallback.volume_id(), "ISO_STUB");
+    assert_eq!(sorted(&fallback.entries().unwrap()), sorted(&stub));
+    assert!(fallback.el_torito().bios && fallback.el_torito().efi);
+    let _ = fs::remove_dir_all(&d);
 }
 
 fn exercise(p: &Path) {
