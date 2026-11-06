@@ -174,9 +174,9 @@ jobs:
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     steps:
+      # The package is built from the Linux artifact and packaging assets;
+      # neither vendored submodule is needed in the minimal Arch container.
       - uses: actions/checkout@v7
-        with:
-          submodules: recursive
       - uses: actions/download-artifact@v8
         with:
           name: bin-linux-x86_64
