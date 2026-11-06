@@ -5938,7 +5938,7 @@ dependencies = [
 
 [[package]]
 name = "rustfus-cli"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "clap",
  "rustfus-core",
@@ -5949,7 +5949,7 @@ dependencies = [
 
 [[package]]
 name = "rustfus-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bzip2",
  "clap",
@@ -5973,7 +5973,7 @@ dependencies = [
 
 [[package]]
 name = "rustfus-gui"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "gpui-kit",
