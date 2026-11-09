@@ -50,6 +50,12 @@ pub(super) fn shell() -> Option<String> {
 fn command(shell: &str) -> Command {
     let mut c = Command::new(shell);
     c.env_remove("PSModulePath");
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Fido is a background helper; never create a visible PowerShell window.
+        c.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     c
 }
 

@@ -58,10 +58,15 @@ pub fn human(bytes: u64) -> String {
 }
 
 pub fn run(cmd: &str, args: &[&str]) -> Result<String, String> {
-    let out = Command::new(cmd)
-        .args(args)
-        .output()
-        .map_err(|e| format!("{cmd}: {e}"))?;
+    let mut command = Command::new(cmd);
+    command.args(args);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // Keep helper commands, especially PowerShell, out of the user's taskbar.
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let out = command.output().map_err(|e| format!("{cmd}: {e}"))?;
     if !out.status.success() {
         return Err(format!(
             "{cmd} failed: {}",
